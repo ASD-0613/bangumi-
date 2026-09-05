@@ -1,7 +1,7 @@
-# Bangumi 番剧数据查询工具（bilibili_bangumi）v2.8.0
+# Bangumi 番剧数据查询工具（bilibili_bangumi）v2.9.0
 
-基于 **Bangumi API** 的番剧数据查询工具，提供 **PyQt5 图形界面**（默认入口）
-与 **命令行版** 两种交互方式。
+基于 **Bangumi API** 的番剧数据查询工具，以 **Windows 单文件 exe** 形式分发
+（PyQt5 图形界面，双击即用，无需安装 Python）。
 
 功能：
 
@@ -17,15 +17,17 @@
 
 ## 安装与运行
 
-环境：Python 3.10+，需能访问 `api.bgm.tv`。
+**普通用户**：到 [Releases](https://github.com/ASD-0613/bangumi-/releases)
+下载 `BangumiQuery-<版本号>.zip`，解压后双击其中的 exe 即可（无控制台窗口、
+无需安装 Python）。首次运行如出现 SmartScreen 警告，点「更多信息」→
+「仍要运行」（未签名 exe 的正常现象）。
+
+**开发者**（源码仅用于调试与打包，需 Python 3.10+，能访问 `api.bgm.tv`）：
 
 ```bash
-pip install -r requirements.txt
-# 依赖：PyQt5、requests（GUI / 数据层）、rich（命令行版）
-
-python run.py                        # 图形界面（默认入口）
-python -m bilibili_bangumi.main      # 同上
-python -m bilibili_bangumi.cli_main  # 命令行版
+pip install -r requirements.txt        # PyQt5、requests
+python -m bilibili_bangumi.main        # 开发调试运行 GUI
+pip install pyinstaller && python build_exe.py   # 打包 exe
 ```
 
 ### GUI 用法要点
@@ -138,21 +140,18 @@ python -m bilibili_bangumi.cli_main  # 命令行版
 
 ```
 项目根目录/
-├── run.py                    # 启动脚本（图形界面）
-├── check_network.py          # 网络诊断工具（独立脚本）
 ├── build_exe.py              # Windows 单文件 exe 打包脚本（PyInstaller）
+├── check_network.py          # 网络诊断工具（开发者脚本）
 ├── requirements.txt
 ├── README.md
 ├── bilibili_bangumi/
 │   ├── config.py             # 配置（应用名/版本号唯一来源、代理/超时、榜单参数）
 │   ├── main.py               # GUI（PyQt5）
-│   ├── cli_main.py           # 命令行入口（rich）
 │   ├── api/bangumi.py        # 数据层：Bangumi API v0 封装
 │   ├── models/bangumi.py     # 数据模型 + 字段映射 + 状态/地区推断
 │   └── utils/
-│       ├── display.py        # rich 展示（命令行版）
 │       └── cache.py          # 本地磁盘缓存（封面图片，BANGUMI_CACHE_DIR 可覆盖）
-└── tests/                    # 离线测试（解析/展示/CLI/缓存/GUI 冒烟）
+└── tests/                    # 离线测试（解析/缓存/GUI 冒烟）
 ```
 
 ## 运行测试
@@ -163,9 +162,9 @@ python -m unittest discover -s tests -v
 
 GUI 测试以 `QT_QPA_PLATFORM=offscreen` 离屏运行；无 PyQt5 时自动跳过。
 
-## 打包为 exe（Windows，可选）
+## 打包为 exe（Windows）
 
-生成无需安装 Python 的单文件可执行程序（无控制台黑窗）：
+生成项目的分发形态——无需安装 Python 的单文件可执行程序（无控制台黑窗）：
 
 ```bash
 pip install pyinstaller   # 仅构建机需要，运行 exe 的用户不需要
@@ -184,6 +183,14 @@ python build_exe.py       # 产物：dist/BangumiQuery-<版本号>.exe
 
 ## 修订记录
 
+- **v2.9.0**
+  - 分发方式变更：**移除两个非 exe 打开方式**——`python run.py` 启动脚本与
+    命令行版（`cli_main.py` / `utils/display.py`，rich 依赖随之移除），
+    exe 成为唯一使用入口；
+  - `build_exe.py` 改用构建时生成的临时入口（不再依赖 run.py），并继续
+    排除 Anaconda 环境中的 PySide6 / matplotlib 等无关大件；
+  - Release 附件 zip 内含 exe，解压即可使用；
+  - 数据层、GUI 功能与 v2.8.0 完全一致，仅分发形态变化。
 - **v2.8.0**
   - 新增 Windows 单文件打包：`python build_exe.py` 一键生成无控制台的
     `BangumiQuery-<版本号>.exe`（详见"打包为 exe"一节）；

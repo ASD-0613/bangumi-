@@ -1,6 +1,6 @@
 """番剧数据查询工具 —— 数据层：Bangumi API v0 封装。
 
-本模块对外提供的函数签名与数据类保持不变（供 cli_main / GUI / 测试复用），
+本模块对外提供的函数签名与数据类保持不变（供 GUI / 测试复用），
 仅将数据来源由 bilibili 替换为 Bangumi：
 
 - 搜索番剧：``POST /v0/search/subjects``（按关键词 + 类型过滤，sort=match）

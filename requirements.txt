@@ -1,12 +1,13 @@
-# Bangumi 番剧数据查询工具依赖
-# Python 3.10+
+# Bangumi 番剧数据查询工具依赖（仅供开发者：源码调试 / 打包 exe）
+# 普通用户直接使用 Release 页发布的 exe，无需安装 Python 与任何依赖。
 
-# 图形界面（main.py，默认入口）
+# 图形界面（main.py）
 PyQt5>=5.15
 requests>=2.28
 
-# 命令行版备份入口（cli_main.py）使用
-rich>=13.0
+# 打包 exe（仅构建时需要）：
+#   pip install pyinstaller
+#   python build_exe.py
 
-# 说明：数据层（api/bangumi.py）已迁移到 Bangumi API v0（https://api.bgm.tv/v0），
-# 不再依赖 bilibili-api-python。
+# 说明：v2.9.0 起移除了命令行版（rich 依赖随之移除）；
+# 数据层使用 Bangumi API v0（https://api.bgm.tv/v0），不依赖 bilibili-api-python。

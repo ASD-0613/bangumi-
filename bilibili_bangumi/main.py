@@ -16,10 +16,10 @@
 错误处理沿用 ``api.describe_error``，通过 QMessageBox 弹出提示。
 封面图片由 ``requests`` 在独立后台线程下载。
 
-启动方式（项目根目录下）：
-    python run.py
-    或
-    python -m bilibili_bangumi.main
+启动方式：
+    普通用户：直接运行 Release 页发布的单文件 exe（双击即用，无需 Python）；
+    开发调试：python -m bilibili_bangumi.main（需 PyQt5 + requests）；
+    打包 exe：python build_exe.py（见项目根目录脚本）。
 """
 
 from __future__ import annotations

@@ -49,6 +49,18 @@ def main() -> int:
     name = f"BangumiQuery-{config.VERSION}"
     exe_path = ROOT / "dist" / f"{name}.exe"
 
+    # v2.9.0 起不再有 run.py：构建时生成一个临时入口脚本（位于已被
+    # .gitignore 排除的 build/ 目录），仅负责调用 GUI 主函数。
+    entry_dir = ROOT / "build"
+    entry_dir.mkdir(exist_ok=True)
+    entry = entry_dir / "_entry_gui.py"
+    entry.write_text(
+        "import sys\n"
+        "from bilibili_bangumi.main import main\n"
+        "sys.exit(main())\n",
+        encoding="utf-8",
+    )
+
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean",
@@ -56,7 +68,9 @@ def main() -> int:
         "--name", name,
         # 生成的 .spec 归入 build/（已被 .gitignore 排除），构建参数以本脚本为准
         "--specpath", "build",
-        "run.py",
+        # 临时入口位于 build/ 子目录，需显式提供项目根目录以定位包
+        "--paths", str(ROOT),
+        str(entry.relative_to(ROOT)),
     ]
     for module in EXCLUDES:
         cmd.extend(["--exclude-module", module])
