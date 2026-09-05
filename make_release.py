@@ -81,8 +81,19 @@ def main() -> int:
                "Accept": "application/vnd.github+json"}
     api = f"https://api.github.com/repos/{REPO}"
 
-    # 1. 删除远端旧 tag 与同名 Release（覆盖策略）
-    #    tag 删除必须验证成功：若远端 tag 仍在，新建 Release 会 422
+    # 1. 覆盖策略：先删同名 Release（按 tag_name 遍历，孤儿 Release 一并清理），
+    #    再删远端 tag——顺序不能反：先删 tag 会让 Release 失去归属变成孤儿，
+    #    之后按 tag 名再也查不到它
+    r = requests.get(f"{api}/releases?per_page=100", headers=headers,
+                     timeout=(30, 120))
+    if r.status_code == 200:
+        for rel in r.json():
+            if rel.get("tag_name") == tag:
+                d = requests.delete(f"{api}/releases/{rel['id']}",
+                                    headers=headers, timeout=(30, 120))
+                print(f"[release] 已移除旧 Release {rel['id']}（HTTP {d.status_code}）")
+    else:
+        raise SystemExit(f"[失败] 查询 Release 列表：HTTP {r.status_code}")
     for attempt in range(3):
         subprocess.run(["git", "push", "origin", f":refs/tags/{tag}"],
                        capture_output=True, text=True)
@@ -100,14 +111,6 @@ def main() -> int:
         if check.stdout.strip():
             raise SystemExit("[失败] 远端 tag 仍未删除（网络不稳定？），"
                              "请恢复网络后重跑本脚本")
-    r = requests.get(f"{api}/releases/tags/{tag}", headers=headers,
-                     timeout=(30, 120))
-    if r.status_code == 200:
-        d = requests.delete(f"{api}/releases/{r.json()['id']}",
-                            headers=headers, timeout=(30, 120))
-        print(f"[release] 已移除旧 Release（HTTP {d.status_code}）")
-    elif r.status_code != 404:
-        raise SystemExit(f"[失败] 查询旧 Release：HTTP {r.status_code}")
 
     # 2. 本地建 tag 并指向当前 HEAD
     subprocess.run(["git", "tag", "-f", tag, "HEAD"], check=True,
