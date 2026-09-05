@@ -297,6 +297,32 @@ class GuiSmokeTest(unittest.TestCase):
                 os.environ["BANGUMI_CACHE_DIR"] = old_dir
             tmp.cleanup()
 
+    def test_column_width_memory(self) -> None:
+        """列宽记忆：拖动 → 关闭落盘 → 新窗口恢复上次状态。"""
+        import tempfile
+
+        old_dir = os.environ.get("BANGUMI_CACHE_DIR")
+        tmp = tempfile.TemporaryDirectory()
+        os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
+        try:
+            w1 = gui.MainWindow()
+            w1.search_table.horizontalHeader().resizeSection(1, 500)
+            w1.timeline_tree.header().resizeSection(1, 400)
+            w1.close()  # closeEvent → 列宽落盘
+            w2 = gui.MainWindow()  # 新窗口应恢复记忆
+            self.assertEqual(w2.search_table.columnWidth(1), 500)
+            self.assertEqual(w2.timeline_tree.columnWidth(1), 400)
+            # 记忆生效后，程序铺排不再覆盖用户列宽
+            w2._apply_search_widths()
+            self.assertEqual(w2.search_table.columnWidth(1), 500)
+            w2.close()
+        finally:
+            if old_dir is None:
+                os.environ.pop("BANGUMI_CACHE_DIR", None)
+            else:
+                os.environ["BANGUMI_CACHE_DIR"] = old_dir
+            tmp.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -80,6 +80,7 @@ except ImportError as exc:  # pragma: no cover - 依赖缺失提示
 from . import config
 from .api import bangumi as api
 from .utils import cache as disk_cache
+from .utils import settings as settings_store
 from .utils import watched as watched_store
 from .models.bangumi import (
     EpisodeInfo,
@@ -383,6 +384,11 @@ class MainWindow(QMainWindow):
         self._watched_icons: Dict[int, QPixmap] = {}
         self._watched_fetching: Set[int] = set()
         self._detail_current: Optional[Dict[str, Any]] = None
+        # 列宽记忆：用户手动调过的视图不再被程序自动铺排；
+        # _widths_programmatic 用于区分“程序铺排”与“用户拖动”
+        self._saved_settings: Dict[str, Any] = settings_store.load()
+        self._col_widths_user: Set[str] = set()
+        self._widths_programmatic: bool = False
 
         self._build_ui()
 
@@ -442,6 +448,14 @@ class MainWindow(QMainWindow):
         self._build_timeline_tab()
         self._build_watched_tab()
 
+        # 恢复上次记忆的列宽（存在记忆时优先于程序的自动铺排）
+        if self._saved_settings.get("search_widths"):
+            self._apply_saved_widths("search", self.search_table)
+        if self._saved_settings.get("rank_widths"):
+            self._apply_saved_widths("rank", self.rank_table)
+        if self._saved_settings.get("timeline_widths"):
+            self._apply_saved_widths("timeline", self.timeline_tree)
+
         # 首次切到“排行榜 / 追番日历”标签页时自动加载一次数据；
         # “已看完”为本地数据，每次切入都重新渲染
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -455,6 +469,10 @@ class MainWindow(QMainWindow):
         self.search_table.cellDoubleClicked.connect(self.on_search_row_open)
         # 键盘回车（激活行）同样打开详情
         self.search_table.cellActivated.connect(self.on_search_row_open)
+        # 用户拖动列宽 → 记入“用户已调整”，此后不再被自动铺排覆盖
+        self.search_table.horizontalHeader().sectionResized.connect(
+            lambda i, o, n: self._on_section_resized("search", i, o, n)
+        )
         layout.addWidget(self.search_table, stretch=1)
 
         pager = QHBoxLayout()
@@ -598,6 +616,10 @@ class MainWindow(QMainWindow):
         self.rank_table.cellDoubleClicked.connect(self.on_rank_row_open)
         # 键盘回车（激活行）同样打开详情
         self.rank_table.cellActivated.connect(self.on_rank_row_open)
+        # 用户拖动列宽 → 记入“用户已调整”，此后不再被自动铺排覆盖
+        self.rank_table.horizontalHeader().sectionResized.connect(
+            lambda i, o, n: self._on_section_resized("rank", i, o, n)
+        )
         layout.addWidget(self.rank_table, stretch=1)
 
         # 排行榜分页（与搜索结果一致：每页 config.RANK_PAGE_SIZE 条）
@@ -675,6 +697,10 @@ class MainWindow(QMainWindow):
         self.timeline_tree.itemDoubleClicked.connect(self.on_timeline_item_open)
         # 键盘回车（激活行）同样打开详情
         self.timeline_tree.itemActivated.connect(self.on_timeline_item_open)
+        # 用户拖动列宽 → 记入“用户已调整”，此后不再被自动铺排覆盖
+        self.timeline_tree.header().sectionResized.connect(
+            lambda i, o, n: self._on_section_resized("timeline", i, o, n)
+        )
         layout.addWidget(self.timeline_tree, stretch=1)
 
         # 默认高亮“今天”，列宽在首次渲染与窗口缩放时自适应
@@ -988,10 +1014,16 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"搜索完成，共 {len(result.items)} 条")
 
     def _apply_search_widths(self) -> None:
-        """搜索表格：封面列按行高、番剧名称列加宽。"""
+        """搜索表格：封面列按行高、番剧名称列加宽（用户调过列宽则不覆盖）。"""
+        if "search" in self._col_widths_user:
+            return
         header = self.search_table.horizontalHeader()
-        header.resizeSection(0, _COVER_COLUMN_WIDTH)
-        header.resizeSection(1, 320)
+        self._widths_programmatic = True
+        try:
+            header.resizeSection(0, _COVER_COLUMN_WIDTH)
+            header.resizeSection(1, 320)
+        finally:
+            self._widths_programmatic = False
 
     def _ensure_search_covers(self, items: Sequence[SearchItem]) -> None:
         """为当前页搜索结果异步加载封面（独立首列）。"""
@@ -1277,6 +1309,7 @@ class MainWindow(QMainWindow):
         if show_metric:
             headers.append(kind)
         headers.append("开播时间")
+        count_changed = self.rank_table.columnCount() != len(headers)
         self.rank_table.setColumnCount(len(headers))
         self.rank_table.setHorizontalHeaderLabels(headers)
 
@@ -1302,11 +1335,19 @@ class MainWindow(QMainWindow):
                     cell.setTextAlignment(Qt.AlignCenter)
                 self.rank_table.setItem(row_idx, col_idx, cell)
 
-        # 封面列宽贴合行高；番剧名称列宽更大
+        # 列宽：用户已手动调过且列数未变 → 保留用户的列宽；
+        # 列数变化（切换排序维度）→ 回到默认铺排，待关闭时重新记忆
         header = self.rank_table.horizontalHeader()
-        header.resizeSection(0, _COVER_COLUMN_WIDTH)
-        header.resizeSection(1, 48)
-        header.resizeSection(2, 320)
+        if count_changed:
+            self._col_widths_user.discard("rank")
+        if "rank" not in self._col_widths_user:
+            self._widths_programmatic = True
+            try:
+                header.resizeSection(0, _COVER_COLUMN_WIDTH)
+                header.resizeSection(1, 48)
+                header.resizeSection(2, 320)
+            finally:
+                self._widths_programmatic = False
 
         self.rank_page_label.setText(
             f"第 {self._rank_page} 页 / 共 {self._rank_pages} 页"
@@ -1485,13 +1526,19 @@ class MainWindow(QMainWindow):
         self._ensure_timeline_first_dates(day.items)
 
     def _apply_timeline_widths(self) -> None:
-        """封面列固定宽；番剧名称列约占数据栏一半宽。"""
+        """封面列固定宽；番剧名称列约占数据栏一半宽（用户调过列宽则不覆盖）。"""
+        if "timeline" in self._col_widths_user:
+            return
         view_width = self.timeline_tree.viewport().width()
         header = self.timeline_tree.header()
         name_width = max(240, int(view_width * 0.5))
-        header.resizeSection(0, _COVER_COLUMN_WIDTH)  # 封面
-        header.resizeSection(1, name_width)            # 番剧名称 ≈ 一半
-        header.resizeSection(2, 150)                   # 开播时间
+        self._widths_programmatic = True
+        try:
+            header.resizeSection(0, _COVER_COLUMN_WIDTH)  # 封面
+            header.resizeSection(1, name_width)            # 番剧名称 ≈ 一半
+            header.resizeSection(2, 150)                   # 开播时间
+        finally:
+            self._widths_programmatic = False
 
     def _find_timeline_row(self, season_id: int) -> Optional[QTreeWidgetItem]:
         """按条目 ID 在当前平铺行中定位（用于异步回填）。"""
@@ -1658,6 +1705,52 @@ class MainWindow(QMainWindow):
         if season_id is not None:
             self._open_detail(int(season_id))
 
+    # ------------------------------------------------------------------
+    # 列宽记忆（搜索/排行榜/追番日历）
+    # ------------------------------------------------------------------
+
+    def _on_section_resized(self, key: str, _index: int,
+                            _old: int, _new: int) -> None:
+        """列被拖动：记入“用户已调整”（程序铺排期间的事件忽略）。"""
+        if self._widths_programmatic:
+            return
+        self._col_widths_user.add(key)
+
+    def _apply_saved_widths(self, key: str, view: Any) -> None:
+        """把上次记忆的列宽套用到视图，并标记为“用户已调整”。"""
+        saved = self._saved_settings.get(key + "_widths")
+        header = (view.horizontalHeader() if hasattr(view, "horizontalHeader")
+                  else view.header())
+        if isinstance(saved, list):
+            self._widths_programmatic = True
+            try:
+                for i, width in enumerate(saved[: view.columnCount()]):
+                    if isinstance(width, int) and width >= 20:
+                        header.resizeSection(i, width)
+            finally:
+                self._widths_programmatic = False
+        self._col_widths_user.add(key)
+
+    def _persist_column_widths(self) -> None:
+        """把三个数据视图的当前列宽写入 settings.json（尽力而为）。"""
+        try:
+            settings_store.update(
+                search_widths=[
+                    self.search_table.columnWidth(i)
+                    for i in range(self.search_table.columnCount())
+                ],
+                rank_widths=[
+                    self.rank_table.columnWidth(i)
+                    for i in range(self.rank_table.columnCount())
+                ],
+                timeline_widths=[
+                    self.timeline_tree.columnWidth(i)
+                    for i in range(self.timeline_tree.columnCount())
+                ],
+            )
+        except Exception:  # noqa: BLE001 - 偏好保存失败不影响退出
+            pass
+
     def resizeEvent(self, event: Any) -> None:
         """窗口缩放时同步调整追番日历列宽（番剧名称列≈一半）。"""
         super().resizeEvent(event)
@@ -1677,6 +1770,7 @@ class MainWindow(QMainWindow):
         因此此时直接 os._exit 立即结束进程，保证退出永远干脆利落。
         """
         self.hide()  # 立即从屏幕消失，收尾过程对用户不可见
+        self._persist_column_widths()  # 列宽记忆落盘（业务数据均为即时保存）
         deadline = time.monotonic() + 2.0
         for worker in list(self._workers):
             remaining_ms = int(max(0.0, deadline - time.monotonic()) * 1000)
