@@ -29,6 +29,7 @@ import asyncio
 import sys
 import time
 import traceback
+from pathlib import Path
 from typing import Any, Awaitable, Callable, List, Optional, Sequence, Set, Tuple
 
 try:  # GUI 依赖检测：缺少时给出清晰的中文提示
@@ -1683,6 +1684,28 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+def _app_icon() -> Optional[QIcon]:
+    """加载程序图标（icon.ico）。
+
+    打包态：从 PyInstaller 自解压目录（sys._MEIPASS，build_exe.py 已把
+    icon.ico 打进包内）取；开发态：从项目根目录取。找不到返回 None。
+    """
+    candidates: List[Path] = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "icon.ico")
+        candidates.append(Path(sys.executable).parent / "icon.ico")
+    else:
+        candidates.append(Path(__file__).resolve().parent.parent / "icon.ico")
+    for path in candidates:
+        if path.is_file():
+            icon = QIcon(str(path))
+            if not icon.isNull():
+                return icon
+    return None
+
+
 def main() -> int:
     """GUI 程序入口：初始化网络设置并启动 Qt 事件循环。"""
     api.apply_network_settings()  # 沿用原有代理/超时配置逻辑
@@ -1691,6 +1714,9 @@ def main() -> int:
     # 全局字体用微软雅黑：Windows 默认字体渲染中文发虚，雅黑明显更清晰；
     # 各控件的专用字体（表格 12pt、标题 16pt 等）在此基础之上覆盖
     app.setFont(QFont("Microsoft YaHei UI", 10))
+    icon = _app_icon()
+    if icon is not None:
+        app.setWindowIcon(icon)  # 窗口/任务栏图标
     window = MainWindow()
     window.show()
     return app.exec_()
