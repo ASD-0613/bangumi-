@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import time
 import traceback
@@ -1668,19 +1669,22 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event: Any) -> None:
-        """退出前等待 / 终止仍在运行的后台线程，避免 Qt 崩溃。
+        """退出处理：先隐藏窗口（对用户“秒退”），再给后台线程约 2 秒收尾。
 
-        所有线程共享约 2 秒的优雅收尾窗口；仍阻塞在网络请求上的线程
-        只能 terminate（Qt 不推荐，但作为最后手段，好过退出挂死）。
+        若线程仍阻塞在网络请求上（网络差时一次请求可挂 10 秒以上），
+        terminate() 对卡在 SSL/socket 原生代码里的线程有死锁风险——这正是
+        “关闭时偶尔卡死”的原因。所有数据（打钩记录、缓存）均为即时落盘，
+        因此此时直接 os._exit 立即结束进程，保证退出永远干脆利落。
         """
+        self.hide()  # 立即从屏幕消失，收尾过程对用户不可见
         deadline = time.monotonic() + 2.0
         for worker in list(self._workers):
             remaining_ms = int(max(0.0, deadline - time.monotonic()) * 1000)
             if remaining_ms > 0 and worker.wait(remaining_ms):
-                continue
-            worker.requestInterruption()
-            worker.terminate()
-            worker.wait(200)
+                continue  # 线程正常收尾
+            # 线程卡在网络请求上：立即结束进程（数据已落盘，无丢失风险）
+            event.accept()
+            os._exit(0)
         event.accept()
 
 
