@@ -821,8 +821,12 @@ class MainWindow(QMainWindow):
             f"清空本地缓存目录（封面图片等）：\n{disk_cache.cache_root()}"
         )
 
-    def _ask_clear_watched(self) -> bool:
-        """询问是否连带清除“已看完”记录；默认（直接确认）为不清除。"""
+    def _ask_clear_cache(self) -> Optional[bool]:
+        """清除前的确认弹窗。
+
+        返回值：True=连带清除“已看完”记录；False=仅清缓存（默认）；
+        None=用户取消（点击“取消”按钮、Esc 或关闭弹窗）——什么都不清。
+        """
         box = QMessageBox(self)
         box.setWindowTitle("清除缓存")
         box.setText(
@@ -830,14 +834,24 @@ class MainWindow(QMainWindow):
             "是否一并清除「已看完」的本地记录？"
         )
         clear_btn = box.addButton("一并清除", QMessageBox.YesRole)
-        keep_btn = box.addButton("保留记录", QMessageBox.NoRole)
-        box.setDefaultButton(keep_btn)  # 默认不清除
+        keep_btn = box.addButton("仅清缓存", QMessageBox.NoRole)
+        cancel_btn = box.addButton("取消", QMessageBox.RejectRole)
+        box.setDefaultButton(keep_btn)
         box.exec_()
-        return box.clickedButton() is clear_btn
+        clicked = box.clickedButton()
+        if clicked is clear_btn:
+            return True
+        if clicked is keep_btn:
+            return False
+        return None  # 取消按钮 / Esc / 关闭弹窗
 
     def on_clear_cache(self) -> None:
-        """清除本地磁盘缓存；“已看完”记录默认保留，可自愿选择一并清除。"""
-        also_clear_watched = self._ask_clear_watched()
+        """清除本地磁盘缓存；“已看完”记录默认保留；可随时取消。"""
+        choice = self._ask_clear_cache()
+        if choice is None:
+            self.statusBar().showMessage("已取消清除缓存")
+            return
+        also_clear_watched = choice
         try:
             count, freed = disk_cache.clear_cache()
         except OSError as exc:

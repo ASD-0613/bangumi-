@@ -82,8 +82,24 @@ def main() -> int:
     api = f"https://api.github.com/repos/{REPO}"
 
     # 1. 删除远端旧 tag 与同名 Release（覆盖策略）
-    subprocess.run(["git", "push", "origin", f":refs/tags/{tag}"],
-                   capture_output=True, text=True)  # 不存在则静默
+    #    tag 删除必须验证成功：若远端 tag 仍在，新建 Release 会 422
+    for attempt in range(3):
+        subprocess.run(["git", "push", "origin", f":refs/tags/{tag}"],
+                       capture_output=True, text=True)
+        check = subprocess.run(
+            ["git", "ls-remote", "--tags", "origin", tag],
+            capture_output=True, text=True,
+        )
+        if not check.stdout.strip():
+            break
+        print(f"[tag] 远端 tag 删除未生效（第 {attempt + 1}/3 次），重试…")
+        time.sleep(5)
+    else:
+        check = subprocess.run(["git", "ls-remote", "--tags", "origin", tag],
+                               capture_output=True, text=True)
+        if check.stdout.strip():
+            raise SystemExit("[失败] 远端 tag 仍未删除（网络不稳定？），"
+                             "请恢复网络后重跑本脚本")
     r = requests.get(f"{api}/releases/tags/{tag}", headers=headers,
                      timeout=(30, 120))
     if r.status_code == 200:
@@ -126,6 +142,9 @@ def main() -> int:
                          f"{r.json().get('message', '')[:200]}")
     release_id, html = r.json()["id"], r.json()["html_url"]
     print(f"[release] 已创建：{html}")
+    # 删除本地 tag：避免与同名分支产生 push 引用歧义
+    # （远端 tag 已由 GitHub 依据本 Release 自动建立）
+    subprocess.run(["git", "tag", "-d", tag], capture_output=True, text=True)
 
     # 4. 上传附件（失败重试）
     zip_path = _build_zip(top, exe)
