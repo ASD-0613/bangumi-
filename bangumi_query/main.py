@@ -36,6 +36,7 @@ try:  # GUI 依赖检测：缺少时给出清晰的中文提示
     from PyQt5.QtCore import QPointF, QSize, QThread, Qt, pyqtSignal
     from PyQt5.QtGui import (
         QColor,
+        QFont,
         QIcon,
         QImage,
         QPainter,
@@ -393,21 +394,32 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(10, 10, 10, 10)
 
-        # 顶部搜索栏
+        # 顶部搜索栏（文字加粗放大，纵向加高）
         search_bar = QHBoxLayout()
         search_bar.addWidget(QLabel("搜索番剧："))
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("输入番剧名称 / 关键词，如：刀剑神域")
         self.search_input.setClearButtonEnabled(True)
+        search_font = self.search_input.font()
+        search_font.setPointSize(11)
+        search_font.setBold(True)
+        self.search_input.setFont(search_font)
+        self.search_input.setMinimumHeight(36)
         self.search_input.returnPressed.connect(self.on_search_clicked)
         search_bar.addWidget(self.search_input, stretch=1)
         self.search_button = QPushButton("搜索")
+        self.search_button.setMinimumHeight(36)
         self.search_button.clicked.connect(self.on_search_clicked)
         search_bar.addWidget(self.search_button)
         root.addLayout(search_bar)
 
-        # 多标签页
+        # 多标签页（页签名加粗放大）
         self.tabs = QTabWidget(central)
+        tab_bar = self.tabs.tabBar()
+        tab_font = tab_bar.font()
+        tab_font.setPointSize(11)
+        tab_font.setBold(True)
+        tab_bar.setFont(tab_font)
         root.addWidget(self.tabs, stretch=1)
 
         # 底部：本地缓存占用提示 + 清除缓存按钮
@@ -680,7 +692,12 @@ class MainWindow(QMainWindow):
         layout.addLayout(bar)
 
         # Steam 仓库式网格：封面在上、简中名在下；单击选中，双击进详情
+        # （条目名称用加粗字体，更醒目）
         self.watched_grid = QListWidget()
+        watched_font = self.watched_grid.font()
+        watched_font.setPointSize(10)
+        watched_font.setBold(True)
+        self.watched_grid.setFont(watched_font)
         self.watched_grid.setViewMode(QListView.IconMode)
         self.watched_grid.setResizeMode(QListView.Adjust)
         self.watched_grid.setMovement(QListView.Static)
@@ -804,8 +821,23 @@ class MainWindow(QMainWindow):
             f"清空本地缓存目录（封面图片等）：\n{disk_cache.cache_root()}"
         )
 
+    def _ask_clear_watched(self) -> bool:
+        """询问是否连带清除“已看完”记录；默认（直接确认）为不清除。"""
+        box = QMessageBox(self)
+        box.setWindowTitle("清除缓存")
+        box.setText(
+            "即将清空封面图片缓存。\n"
+            "是否一并清除「已看完」的本地记录？"
+        )
+        clear_btn = box.addButton("一并清除", QMessageBox.YesRole)
+        keep_btn = box.addButton("保留记录", QMessageBox.NoRole)
+        box.setDefaultButton(keep_btn)  # 默认不清除
+        box.exec_()
+        return box.clickedButton() is clear_btn
+
     def on_clear_cache(self) -> None:
-        """清除本地磁盘缓存；成功后弹窗提示并刷新占用显示。"""
+        """清除本地磁盘缓存；“已看完”记录默认保留，可自愿选择一并清除。"""
+        also_clear_watched = self._ask_clear_watched()
         try:
             count, freed = disk_cache.clear_cache()
         except OSError as exc:
@@ -818,6 +850,9 @@ class MainWindow(QMainWindow):
         self._rank_icon_fetching.clear()
         self._timeline_covers.clear()
         self._timeline_icon_fetching.clear()
+        if also_clear_watched:
+            watched_store.clear()
+            self._watched_icons.clear()
         self._refresh_cache_info()
         if count:
             message = (
@@ -826,6 +861,11 @@ class MainWindow(QMainWindow):
             )
         else:
             message = "缓存目录为空，没有需要清除的内容。"
+        message += (
+            "\n「已看完」的本地记录已一并清除。"
+            if also_clear_watched
+            else "\n「已看完」的本地记录已保留。"
+        )
         QMessageBox.information(self, "清除缓存", message)
 
     # ------------------------------------------------------------------
@@ -1634,6 +1674,9 @@ def main() -> int:
     api.apply_network_settings()  # 沿用原有代理/超时配置逻辑
     app = QApplication(sys.argv)
     app.setApplicationName(config.APP_NAME)
+    # 全局字体用微软雅黑：Windows 默认字体渲染中文发虚，雅黑明显更清晰；
+    # 各控件的专用字体（表格 12pt、标题 16pt 等）在此基础之上覆盖
+    app.setFont(QFont("Microsoft YaHei UI", 10))
     window = MainWindow()
     window.show()
     return app.exec_()

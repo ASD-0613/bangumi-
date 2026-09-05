@@ -20,7 +20,7 @@ from typing import Any, Dict, List
 
 from .cache import cache_root
 
-__all__ = ["watched_path", "load_items", "contains", "add", "remove"]
+__all__ = ["watched_path", "load_items", "contains", "add", "remove", "clear"]
 
 
 def watched_path() -> Path:
@@ -81,3 +81,11 @@ def remove(subject_id: int) -> None:
     remaining = [it for it in items if it["id"] != subject_id]
     if len(remaining) != len(items):
         _save(remaining)
+
+
+def clear() -> None:
+    """删除整个 watched.json（不存在时静默）。"""
+    try:
+        watched_path().unlink()
+    except OSError:
+        pass

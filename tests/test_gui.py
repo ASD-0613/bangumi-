@@ -181,22 +181,52 @@ class GuiSmokeTest(unittest.TestCase):
         self.assertEqual(self.window._workers, set())
 
     def test_clear_cache_button(self) -> None:
-        """底部“清除缓存”：清理磁盘缓存并成功弹窗提示。"""
+        """底部“清除缓存”：默认保留“已看完”记录，仅清空磁盘缓存。"""
         import tempfile
 
         from bangumi_query.utils import cache as disk_cache
+        from bangumi_query.utils import watched as watched_store
 
         old_dir = os.environ.get("BANGUMI_CACHE_DIR")
         tmp = tempfile.TemporaryDirectory()
-        os.environ["BANGUMI_CACHE_DIR"] = tmp.name
+        os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
         try:
             disk_cache.store_cached_bytes("http://example.com/a.jpg", b"abc")
+            watched_store.add(33346, "刀剑神域", "")
             self.assertEqual(disk_cache.cache_size(), (1, 3))
-            with patch.object(gui.QMessageBox, "information") as mock_info:
+            with patch.object(self.window, "_ask_clear_watched",
+                              return_value=False), \
+                 patch.object(gui.QMessageBox, "information") as mock_info:
                 self.window.on_clear_cache()
             mock_info.assert_called_once()
             self.assertEqual(disk_cache.cache_size(), (0, 0))
-            self.assertIn("本地缓存", self.window.cache_info_label.text())
+            self.assertTrue(watched_store.contains(33346))  # 记录保留
+        finally:
+            if old_dir is None:
+                os.environ.pop("BANGUMI_CACHE_DIR", None)
+            else:
+                os.environ["BANGUMI_CACHE_DIR"] = old_dir
+            tmp.cleanup()
+
+    def test_clear_cache_also_watched(self) -> None:
+        """询问框选“一并清除”时：缓存与“已看完”记录都被删除。"""
+        import tempfile
+
+        from bangumi_query.utils import cache as disk_cache
+        from bangumi_query.utils import watched as watched_store
+
+        old_dir = os.environ.get("BANGUMI_CACHE_DIR")
+        tmp = tempfile.TemporaryDirectory()
+        os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
+        try:
+            disk_cache.store_cached_bytes("http://example.com/b.jpg", b"abcd")
+            watched_store.add(8, "鬼灭之刃", "")
+            with patch.object(self.window, "_ask_clear_watched",
+                              return_value=True), \
+                 patch.object(gui.QMessageBox, "information"):
+                self.window.on_clear_cache()
+            self.assertEqual(disk_cache.cache_size(), (0, 0))
+            self.assertFalse(watched_store.contains(8))
         finally:
             if old_dir is None:
                 os.environ.pop("BANGUMI_CACHE_DIR", None)
