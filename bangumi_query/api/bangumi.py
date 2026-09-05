@@ -294,11 +294,23 @@ def _request(
             )
             continue
         except requests.exceptions.SSLError as exc:
-            # 证书校验失败重试无意义，直接给出可操作提示
+            # SSLError 有两类，原因与解法完全不同：
+            # - 证书校验失败（收到不可信证书）→ 检查 TLS 拦截/证书链，
+            #   知情同意时可 BANGUMI_INSECURE=1 临时跳过；
+            # - 握手被中断（EOF/超时）→ 典型的 DNS 污染或 SNI 干扰，
+            #   跳过证书校验毫无帮助，需要从 DNS/代理入手。
+            text = str(exc)
+            if "CERTIFICATE_VERIFY_FAILED" in text or "certificate verify" in text:
+                raise BangumiNetworkError(
+                    "SSL 证书校验失败（收到的证书不可信）。"
+                    "若网络中存在 TLS 拦截代理，请安装其根证书或关闭拦截；"
+                    "确知风险时可设置 BANGUMI_INSECURE=1 临时跳过校验"
+                ) from exc
             raise BangumiNetworkError(
-                "SSL 证书校验失败，无法建立安全连接。"
-                "请更新系统 CA 证书；若确属证书链问题且知情同意，"
-                "可设置 BANGUMI_INSECURE=1 后重试"
+                "TLS 握手被远端中断——常见于 DNS 污染（域名被解析到了"
+                "错误的服务器）。可尝试：① 在代理软件中为 bgm.tv 添加"
+                "“走代理”的规则（让代理远程解析域名）；② 更换/加密 DNS"
+                "（如 DoH）；③ 网络受限时配置 BANGUMI_PROXY 代理"
             ) from exc
         except requests.exceptions.ProxyError as exc:
             raise BangumiNetworkError(
