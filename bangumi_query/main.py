@@ -549,14 +549,14 @@ class MainWindow(QMainWindow):
         # 简介
         outer.addWidget(self._section_label("剧情简介"))
         self.detail_intro = QTextBrowser()
-        self.detail_intro.setFixedHeight(110)
+        self.detail_intro.setFixedHeight(150)
         self.detail_intro.setPlainText("")
         outer.addWidget(self.detail_intro)
 
         # 声优 / 制作团队
         outer.addWidget(self._section_label("主要声优 / 制作团队"))
         self.detail_staff = QTextBrowser()
-        self.detail_staff.setFixedHeight(130)
+        self.detail_staff.setFixedHeight(200)
         self.detail_staff.setPlainText("")
         outer.addWidget(self.detail_staff)
 
@@ -1176,11 +1176,12 @@ class MainWindow(QMainWindow):
             values = episode_row_values(ep, idx)
             for c, value in enumerate(values):
                 self.detail_episode_table.setItem(idx - 1, c, QTableWidgetItem(value))
-        # 表格较高时允许容器滚动
+        # 表格高度：内容多时最高 600px（约可见 13~15 行），少时也保底 240px，
+        # 整页仍可在滚动区里滚动
         row_h = self.detail_episode_table.verticalHeader().defaultSectionSize()
-        self.detail_episode_table.setMaximumHeight(
-            min(len(shown) * (row_h + 4) + 30, 420)
-        )
+        content_height = len(shown) * (row_h + 4) + 30
+        self.detail_episode_table.setMinimumHeight(min(content_height, 240))
+        self.detail_episode_table.setMaximumHeight(min(content_height, 600))
         # 分集被截断时给出提示（与 CLI 版行为对齐）
         self.detail_episode_hint.setText(
             f"共 {len(episodes)} 集，仅展示前 {config.EPISODE_DISPLAY_LIMIT} 集"
