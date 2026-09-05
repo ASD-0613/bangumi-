@@ -1,0 +1,12 @@
+# Bangumi 番剧数据查询工具依赖
+# Python 3.10+
+
+# 图形界面（main.py，默认入口）
+PyQt5>=5.15
+requests>=2.28
+
+# 命令行版备份入口（cli_main.py）使用
+rich>=13.0
+
+# 说明：数据层（api/bangumi.py）已迁移到 Bangumi API v0（https://api.bgm.tv/v0），
+# 不再依赖 bilibili-api-python。
