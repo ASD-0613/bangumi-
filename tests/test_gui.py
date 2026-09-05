@@ -204,6 +204,42 @@ class GuiSmokeTest(unittest.TestCase):
                 os.environ["BANGUMI_CACHE_DIR"] = old_dir
             tmp.cleanup()
 
+    def test_watched_toggle_and_grid(self) -> None:
+        """详情页打钩 → 本地存储 → “已看完”网格渲染/取消。"""
+        import tempfile
+
+        from bangumi_query.utils import watched as watched_store
+
+        old_dir = os.environ.get("BANGUMI_CACHE_DIR")
+        tmp = tempfile.TemporaryDirectory()
+        # watched.json 在缓存目录上一级，这里指向 <tmp>/cache 以隔离
+        os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
+        try:
+            # 详情渲染：勾选框随本地记录初始化（未打钩）
+            self.window._render_detail(_detail())
+            self.assertFalse(self.window.watched_check.isChecked())
+            self.assertTrue(self.window.watched_check.isEnabled())
+            # 打钩：toggled 信号触发入库
+            self.window.watched_check.setChecked(True)
+            self.assertTrue(watched_store.contains(33346))
+            # “已看完”网格：1 张卡片，角色数据为条目 ID
+            self.window._render_watched()
+            self.assertEqual(self.window.watched_grid.count(), 1)
+            item = self.window.watched_grid.item(0)
+            self.assertEqual(item.data(Qt.UserRole), 33346)
+            self.assertEqual(item.text(), "刀剑神域")
+            # 取消打钩 → 移出网格
+            self.window.watched_check.setChecked(False)
+            self.assertFalse(watched_store.contains(33346))
+            self.window._render_watched()
+            self.assertEqual(self.window.watched_grid.count(), 0)
+        finally:
+            if old_dir is None:
+                os.environ.pop("BANGUMI_CACHE_DIR", None)
+            else:
+                os.environ["BANGUMI_CACHE_DIR"] = old_dir
+            tmp.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

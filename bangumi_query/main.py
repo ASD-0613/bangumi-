@@ -8,7 +8,8 @@
     │   ├ 搜索结果(表格, 可分页)                 │
     │   ├ 番剧详情(封面图 + 基本信息 + 分集)     │
     │   ├ 热门排行榜(表格, 可切换类别)           │
-    │   └ 追番日历(按星期分组的树形列表)         │
+    │   ├ 追番日历(按星期分组的树形列表)         │
+    │   └ 已看完(封面网格, 详情页打钩后收录)     │
     └────────────────────────────────────────────┘
 
 所有网络请求均在后台线程(QThread + asyncio.run)中执行，不阻塞界面。
@@ -32,8 +33,16 @@ from typing import Any, Awaitable, Callable, List, Optional, Sequence, Set, Tupl
 
 try:  # GUI 依赖检测：缺少时给出清晰的中文提示
     import requests  # noqa: F401 - 用于后台线程下载封面图
-    from PyQt5.QtCore import QSize, QThread, Qt, pyqtSignal
-    from PyQt5.QtGui import QIcon, QImage, QPixmap
+    from PyQt5.QtCore import QPointF, QSize, QThread, Qt, pyqtSignal
+    from PyQt5.QtGui import (
+        QColor,
+        QIcon,
+        QImage,
+        QPainter,
+        QPen,
+        QPixmap,
+        QPolygonF,
+    )
     from PyQt5.QtWidgets import (
         QAbstractItemView,
         QApplication,
@@ -43,6 +52,9 @@ try:  # GUI 依赖检测：缺少时给出清晰的中文提示
         QHeaderView,
         QLabel,
         QLineEdit,
+        QListWidget,
+        QListWidgetItem,
+        QListView,
         QMainWindow,
         QMessageBox,
         QPushButton,
@@ -65,6 +77,7 @@ except ImportError as exc:  # pragma: no cover - 依赖缺失提示
 from . import config
 from .api import bangumi as api
 from .utils import cache as disk_cache
+from .utils import watched as watched_store
 from .models.bangumi import (
     EpisodeInfo,
     RankItem,
@@ -269,6 +282,49 @@ class CoverWorker(QThread):
         self.image_ready.emit(self._url, data)
 
 
+class WatchedCheckBox(QPushButton):
+    """详情页“已看完”打钩框：粗黑边圆角正方形方框。
+
+    - 未选中：白底 + 浅灰色钩；
+    - 选中：粗黑边 + 绿色底，钩变纯黑并稍微放大。
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(44, 44)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("标记为已看完")
+
+    def paintEvent(self, event: Any) -> None:  # noqa: N802 - Qt 命名约定
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect().adjusted(2, 2, -2, -2)
+
+        # 圆角正方形框：粗黑边；选中时绿底
+        painter.setPen(QPen(QColor("#000000"), 3))
+        painter.setBrush(
+            QColor("#3fa34d") if self.isChecked() else QColor("#ffffff")
+        )
+        painter.drawRoundedRect(rect, 9, 9)
+
+        # 钩形折线：选中时纯黑且放大 1.18 倍（围绕中心缩放）
+        w, h = self.width(), self.height()
+        cx, cy = w / 2.0, h / 2.0
+        scale = 1.18 if self.isChecked() else 1.0
+        raw = [(0.26 * w, 0.53 * h), (0.43 * w, 0.69 * h), (0.75 * w, 0.33 * h)]
+        pts = [QPointF(cx + (x - cx) * scale, cy + (y - cy) * scale)
+               for x, y in raw]
+        check_pen = QPen(
+            QColor("#000000" if self.isChecked() else "#c9c9c9"),
+            4 if self.isChecked() else 3.5,
+        )
+        check_pen.setCapStyle(Qt.RoundCap)
+        check_pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(check_pen)
+        painter.drawPolyline(QPolygonF(pts))
+
+
 # ---------------------------------------------------------------------------
 # 主窗口
 # ---------------------------------------------------------------------------
@@ -320,6 +376,10 @@ class MainWindow(QMainWindow):
         self._detail_token: int = 0
         self._detail_pending_id: Optional[int] = None  # 正在加载的条目（防连击重复请求）
         self._cover_url: str = ""
+        # “已看完”：网格封面缓存 + 抓取中集合 + 当前详情条目（打钩用）
+        self._watched_icons: Dict[int, QPixmap] = {}
+        self._watched_fetching: Set[int] = set()
+        self._detail_current: Optional[Dict[str, Any]] = None
 
         self._build_ui()
 
@@ -366,8 +426,10 @@ class MainWindow(QMainWindow):
         self._build_detail_tab()
         self._build_rank_tab()
         self._build_timeline_tab()
+        self._build_watched_tab()
 
-        # 首次切到“排行榜 / 追番日历”标签页时自动加载一次数据
+        # 首次切到“排行榜 / 追番日历”标签页时自动加载一次数据；
+        # “已看完”为本地数据，每次切入都重新渲染
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
         self.statusBar().showMessage("就绪")
@@ -407,14 +469,20 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(content)
         outer.setContentsMargins(8, 8, 8, 8)
 
-        # 标题行
+        # 标题行：番剧名（左）+ “已看完”打钩框（最右侧）
+        title_row = QHBoxLayout()
         self.detail_title = QLabel("暂无详情（请先搜索或从榜单选择番剧）")
         self.detail_title.setWordWrap(True)
         font = self.detail_title.font()
         font.setPointSize(16)
         font.setBold(True)
         self.detail_title.setFont(font)
-        outer.addWidget(self.detail_title)
+        title_row.addWidget(self.detail_title, stretch=1)
+        self.watched_check = WatchedCheckBox()
+        self.watched_check.setEnabled(False)
+        self.watched_check.toggled.connect(self._on_watched_toggled)
+        title_row.addWidget(self.watched_check, 0, Qt.AlignTop)
+        outer.addLayout(title_row)
 
         self.detail_subtitle = QLabel("")
         self.detail_subtitle.setWordWrap(True)
@@ -600,6 +668,32 @@ class MainWindow(QMainWindow):
             self._timeline_day_buttons[self._timeline_selected - 1].setChecked(True)
         self.tabs.addTab(page, "追番日历")
 
+    def _build_watched_tab(self) -> None:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        bar = QHBoxLayout()
+        self.watched_hint = QLabel("在番剧详情页标题右侧的方框打钩，即可加入本页")
+        self.watched_hint.setStyleSheet("color: gray;")
+        bar.addWidget(self.watched_hint)
+        bar.addStretch(1)
+        layout.addLayout(bar)
+
+        # Steam 仓库式网格：封面在上、简中名在下；单击选中，双击进详情
+        self.watched_grid = QListWidget()
+        self.watched_grid.setViewMode(QListView.IconMode)
+        self.watched_grid.setResizeMode(QListView.Adjust)
+        self.watched_grid.setMovement(QListView.Static)
+        self.watched_grid.setSpacing(14)
+        self.watched_grid.setIconSize(QSize(176, 248))
+        self.watched_grid.setWordWrap(True)
+        self.watched_grid.setUniformItemSizes(True)
+        self.watched_grid.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.watched_grid.itemDoubleClicked.connect(self.on_watched_item_open)
+        layout.addWidget(self.watched_grid, stretch=1)
+
+        self.tabs.addTab(page, "已看完")
+
     # ------------------------------------------------------------------
     # 通用小工具
     # ------------------------------------------------------------------
@@ -684,11 +778,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message)
 
     def _on_tab_changed(self, index: int) -> None:
-        """首次切到“排行榜 / 追番日历”标签页时自动加载一次数据。"""
+        """首次切到“排行榜 / 追番日历”标签页时自动加载一次数据；
+        “已看完”为本地数据，每次切入都重新渲染。"""
         if index == 2 and not self._rank_busy and not self._rank_items:
             self.on_rank_refresh()
         elif index == 3 and not self._timeline_busy and not self._timeline_days:
             self.on_timeline_refresh()
+        elif index == 4:
+            self._render_watched()
 
     # ------------------------------------------------------------------
     # 本地磁盘缓存
@@ -914,6 +1011,11 @@ class MainWindow(QMainWindow):
         self.detail_staff.setPlainText("")
         self.detail_episode_table.setRowCount(0)
         self.detail_episode_hint.setText("")
+        self._detail_current = None
+        self.watched_check.blockSignals(True)
+        self.watched_check.setChecked(False)
+        self.watched_check.blockSignals(False)
+        self.watched_check.setEnabled(False)
         self.tabs.setCurrentIndex(1)
         self._busy(f"正在获取番剧详情（season_id={season_id}）…")
 
@@ -947,7 +1049,22 @@ class MainWindow(QMainWindow):
             self.detail_title.setText(title)
             self.detail_subtitle.setText("")
 
-        # 基本信息表
+        # 基本信息/打钩状态：标题下方渲染完成后同步“已看完”勾选状态
+        self._detail_current = {
+            "id": detail.season_id,
+            "title": detail.title,
+            "cover": detail.cover,
+        }
+        if detail.season_id:
+            self.watched_check.blockSignals(True)
+            self.watched_check.setChecked(
+                watched_store.contains(detail.season_id)
+            )
+            self.watched_check.blockSignals(False)
+            self.watched_check.setEnabled(True)
+        else:
+            self.watched_check.setEnabled(False)
+
         rows = detail_info_rows(detail)
         self.detail_info_table.setRowCount(0)
         self.detail_info_table.setRowCount(len(rows))
@@ -1399,6 +1516,91 @@ class MainWindow(QMainWindow):
             self._open_detail(int(season_id))
         else:
             self.statusBar().showMessage("该条目缺少条目 ID，无法查看详情")
+
+    # ------------------------------------------------------------------
+    # 功能 5：已看完（详情页打钩 + Steam 仓库式网格）
+    # ------------------------------------------------------------------
+
+    def _on_watched_toggled(self, checked: bool) -> None:
+        """详情页打钩：把当前番剧加入/移出“已看完”并立即持久化。"""
+        info = self._detail_current
+        if not info or not info.get("id"):
+            return
+        sid = int(info["id"])
+        title = str(info.get("title") or "")
+        if checked:
+            watched_store.add(sid, title, str(info.get("cover") or ""))
+            self.statusBar().showMessage(f"已把「{title}」标记为已看完")
+        else:
+            watched_store.remove(sid)
+            self.statusBar().showMessage(f"已取消「{title}」的已看完标记")
+
+    def _render_watched(self) -> None:
+        """渲染“已看完”网格：封面 + 底部简中名（最新打钩在前）。"""
+        self.watched_grid.clear()
+        items = watched_store.load_items()
+        if not items:
+            self.watched_hint.setText(
+                "暂无已看完的番剧——在番剧详情页标题右侧的方框打钩即可加入"
+            )
+            self.statusBar().showMessage("已看完列表为空")
+            return
+        self.watched_hint.setText(f"共 {len(items)} 部 · 单击选中，双击查看详情")
+        self.statusBar().showMessage(f"已看完共 {len(items)} 部")
+        for it in items:
+            sid = it["id"]
+            item = QListWidgetItem(it["title"] or f"番剧 {sid}")
+            item.setData(Qt.UserRole, sid)
+            item.setSizeHint(QSize(196, 316))
+            item.setTextAlignment(Qt.AlignHCenter)
+            if sid in self._watched_icons:
+                item.setIcon(QIcon(self._watched_icons[sid]))
+            else:
+                item.setIcon(QIcon(self._placeholder_pixmap()))
+            self.watched_grid.addItem(item)
+        self._ensure_watched_covers(items)
+
+    @staticmethod
+    def _placeholder_pixmap() -> QPixmap:
+        """封面未就绪时的灰色占位图。"""
+        pm = QPixmap(176, 248)
+        pm.fill(QColor("#e6e6e6"))
+        return pm
+
+    def _ensure_watched_covers(self, items: Sequence[Dict[str, Any]]) -> None:
+        """为网格条目异步加载封面（优先命中磁盘缓存，与其它页共用）。"""
+        for it in items:
+            sid = it["id"]
+            if (not it.get("cover") or sid in self._watched_icons
+                    or sid in self._watched_fetching):
+                continue
+            self._watched_fetching.add(sid)
+            worker = CoverWorker(it["cover"])
+
+            def on_image(_url: str, data: Any, subject_id: int = sid) -> None:
+                self._watched_fetching.discard(subject_id)
+                if not data:
+                    return
+                pixmap = QPixmap()
+                if not pixmap.loadFromData(data):
+                    return
+                scaled = pixmap.scaled(
+                    176, 248, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self._watched_icons[subject_id] = scaled
+                for row in range(self.watched_grid.count()):
+                    item = self.watched_grid.item(row)
+                    if item.data(Qt.UserRole) == subject_id:
+                        item.setIcon(QIcon(scaled))
+                        break
+
+            worker.image_ready.connect(on_image)
+            self._register(worker)
+
+    def on_watched_item_open(self, item: QListWidgetItem) -> None:
+        season_id = item.data(Qt.UserRole)
+        if season_id is not None:
+            self._open_detail(int(season_id))
 
     def resizeEvent(self, event: Any) -> None:
         """窗口缩放时同步调整追番日历列宽（番剧名称列≈一半）。"""
