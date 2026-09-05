@@ -140,6 +140,7 @@ python -m bilibili_bangumi.cli_main  # 命令行版
 项目根目录/
 ├── run.py                    # 启动脚本（图形界面）
 ├── check_network.py          # 网络诊断工具（独立脚本）
+├── build_exe.py              # Windows 单文件 exe 打包脚本（PyInstaller）
 ├── requirements.txt
 ├── README.md
 ├── bilibili_bangumi/
@@ -162,9 +163,30 @@ python -m unittest discover -s tests -v
 
 GUI 测试以 `QT_QPA_PLATFORM=offscreen` 离屏运行；无 PyQt5 时自动跳过。
 
+## 打包为 exe（Windows，可选）
+
+生成无需安装 Python 的单文件可执行程序（无控制台黑窗）：
+
+```bash
+pip install pyinstaller   # 仅构建机需要，运行 exe 的用户不需要
+python build_exe.py       # 产物：dist/BangumiQuery-<版本号>.exe
+```
+
+- 版本号自动取自 `config.VERSION`；构建参数（onefile + windowed 及依赖排除
+  清单）集中在 `build_exe.py`；
+- 首次运行如出现 SmartScreen 警告：点「更多信息」→「仍要运行」（未签名
+  exe 的正常现象）；
+- exe 的封面缓存与脚本版一致（`%LOCALAPPDATA%\BangumiQuery\cache`），
+  与 exe 所在位置无关；
+- 构建脚本已排除 Anaconda 环境预装的 PySide6 / matplotlib / numpy 等无关
+  大件（PyInstaller 不允许两套 Qt 绑定并存）；若你的环境不同导致构建失败，
+  按报错信息增删 `build_exe.py` 中的 `EXCLUDES` 即可。
+
 ## 修订记录
 
 - **v2.8.0**
+  - 新增 Windows 单文件打包：`python build_exe.py` 一键生成无控制台的
+    `BangumiQuery-<版本号>.exe`（详见"打包为 exe"一节）；
   - 封面图片**本地磁盘缓存**：首次下载成功后写入缓存目录（环境变量
     `BANGUMI_CACHE_DIR` 可自定义，默认 `%LOCALAPPDATA%\BangumiQuery\cache`
     或 `~/.cache/BangumiQuery`），再次显示同一封面（搜索/排行榜/日历/详情
