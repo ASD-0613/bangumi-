@@ -10,4 +10,4 @@ requests>=2.28
 #   python build_exe.py
 
 # 说明：v2.9.0 起移除了命令行版（rich 依赖随之移除）；
-# 数据层使用 Bangumi API v0（https://api.bgm.tv/v0），不依赖 bilibili-api-python。
+# 数据层使用 Bangumi API v0（https://api.bgm.tv/v0）。

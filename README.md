@@ -1,4 +1,4 @@
-# Bangumi 番剧数据查询工具（bilibili_bangumi）v2.9.0
+# Bangumi 番剧数据查询工具（bangumi_query）v2.9.0
 
 基于 **Bangumi API** 的番剧数据查询工具，以 **Windows 单文件 exe** 形式分发
 （PyQt5 图形界面，双击即用，无需安装 Python）。
@@ -26,7 +26,7 @@
 
 ```bash
 pip install -r requirements.txt        # PyQt5、requests
-python -m bilibili_bangumi.main        # 开发调试运行 GUI
+python -m bangumi_query.main        # 开发调试运行 GUI
 pip install pyinstaller && python build_exe.py   # 打包 exe
 ```
 
@@ -59,7 +59,7 @@ pip install pyinstaller && python build_exe.py   # 打包 exe
 
 ## 数据来源与接口
 
-接口请求统一携带 `User-Agent: BilibiliBangumiQuery/<版本号>`
+接口请求统一携带 `User-Agent: BangumiQuery/<版本号>`
 （Bangumi 要求 UA，缺失时返回 403）；封面图片由独立的下载线程获取
 （使用浏览器 UA），并写入本地磁盘缓存。
 
@@ -114,7 +114,7 @@ pip install pyinstaller && python build_exe.py   # 打包 exe
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `BANGUMI_PROXY`（或 `BILIBILI_PROXY`） | 未设置 | HTTP(S) 代理，如 `http://127.0.0.1:7890` |
+| `BANGUMI_PROXY` | 未设置 | HTTP(S) 代理，如 `http://127.0.0.1:7890` |
 | `BANGUMI_API_BASE` | `https://api.bgm.tv/v0` | 自设网关/镜像（需含 `/v0`） |
 | `BANGUMI_CALENDAR_URL` | `https://api.bgm.tv/calendar` | 日历接口地址 |
 | `BANGUMI_CONNECT_TIMEOUT` / `BANGUMI_READ_TIMEOUT` | `5` / `10` 秒 | 连接/读取超时 |
@@ -144,7 +144,7 @@ pip install pyinstaller && python build_exe.py   # 打包 exe
 ├── check_network.py          # 网络诊断工具（开发者脚本）
 ├── requirements.txt
 ├── README.md
-├── bilibili_bangumi/
+├── bangumi_query/
 │   ├── config.py             # 配置（应用名/版本号唯一来源、代理/超时、榜单参数）
 │   ├── main.py               # GUI（PyQt5）
 │   ├── api/bangumi.py        # 数据层：Bangumi API v0 封装

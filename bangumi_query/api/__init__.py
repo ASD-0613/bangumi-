@@ -1,6 +1,6 @@
-"""B 站番剧 API 子包。"""
+"""Bangumi API 子包。"""
 
-from bilibili_bangumi.api.bangumi import (  # noqa: F401
+from bangumi_query.api.bangumi import (  # noqa: F401
     BangumiQueryError,
     apply_network_settings,
     describe_error,

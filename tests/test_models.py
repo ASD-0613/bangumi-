@@ -2,7 +2,7 @@
 
 import unittest
 
-from bilibili_bangumi.models.bangumi import (
+from bangumi_query.models.bangumi import (
     EpisodeInfo,
     RankItem,
     SearchItem,

@@ -1,6 +1,6 @@
 """数据模型子包。"""
 
-from bilibili_bangumi.models.bangumi import (  # noqa: F401
+from bangumi_query.models.bangumi import (  # noqa: F401
     EpisodeInfo,
     RankItem,
     SearchItem,

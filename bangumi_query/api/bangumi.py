@@ -1,7 +1,7 @@
 """番剧数据查询工具 —— 数据层：Bangumi API v0 封装。
 
 本模块对外提供的函数签名与数据类保持不变（供 GUI / 测试复用），
-仅将数据来源由 bilibili 替换为 Bangumi：
+数据来源为 Bangumi API v0：
 
 - 搜索番剧：``POST /v0/search/subjects``（按关键词 + 类型过滤，sort=match）
 - 番剧详情：``GET  /v0/subjects/{id}``（分集另取
@@ -21,7 +21,7 @@
   config.REQUEST_TIMEOUT（默认 10s），避免网络不佳时整体“卡死”；
 - 自动重试：连接/读取超时、HTTP 429、5xx 会按 config.REQUEST_RETRY_TIMES
   自动重试（最多 2 次尝试），重试间短暂退避；
-- 代理配置：config.PROXY（环境变量 BANGUMI_PROXY / BILIBILI_PROXY）由
+- 代理配置：config.PROXY（环境变量 BANGUMI_PROXY）由
   ``apply_network_settings()`` 应用到 requests 会话；未设置时信任系统代理；
   仅在 DEBUG 模式或首次请求时打印一行 “[代理] 使用代理: …”；
 - SSL 校验默认开启，可通过 ``BANGUMI_INSECURE=1`` 关闭（仅在证书问题场景）。
@@ -29,7 +29,7 @@
 注意：
 - 数据映射细节（如 name_cn->标题、rating.score->评分等）见
   ``models/bangumi.py`` 中各 ``from_*`` 工厂方法；
-- Bangumi 不提供“连载/完结”与“播放量/最新一话”等 B 站专有字段，
+- Bangumi 不提供“连载/完结”与“播放量/最新一话”等 播放平台专有字段，
   对应模型字段解析后为 None / 空，界面会显示 “—” 占位。
 """
 
@@ -91,7 +91,7 @@ __all__ = [
 BANGUMI_API_BASE: str = config.BANGUMI_API_BASE
 
 # Bangumi 要求 User-Agent 形如 “应用名/版本号”
-_USER_AGENT = f"BilibiliBangumiQuery/{config.VERSION}"
+_USER_AGENT = f"BangumiQuery/{config.VERSION}"
 
 # 搜索/详情默认覆盖的条目类型：2=动画、6=三次元
 _SUBJECT_TYPES: List[int] = [2, 6]
@@ -155,7 +155,7 @@ def describe_error(exc: BaseException) -> str:
     if isinstance(exc, BangumiNetworkError):
         return (
             f"网络请求失败：{exc}。请检查网络连接；网络受限时可配置代理"
-            "（环境变量 BANGUMI_PROXY 或 BILIBILI_PROXY）"
+            "（环境变量 BANGUMI_PROXY）"
         )
     if isinstance(exc, BangumiQueryError):
         return str(exc)
@@ -209,8 +209,8 @@ def _report_proxy() -> None:
 def apply_network_settings() -> None:
     """把 config 中的代理配置应用到 requests 会话。
 
-    代理配置沿用原有逻辑（config.PROXY，来自环境变量 BANGUMI_PROXY /
-    BILIBILI_PROXY）；未设置代理时 requests 会信任系统环境代理
+    代理配置沿用原有逻辑（config.PROXY，来自环境变量 BANGUMI_PROXY）；
+    未设置代理时 requests 会信任系统环境代理
     （HTTP_PROXY / HTTPS_PROXY，trust_env 默认开启）。
     """
     if config.PROXY:
@@ -283,7 +283,7 @@ def _request(
             # 连接建立阶段超时：通常可重试一次
             last_error = BangumiNetworkError(
                 "无法连接到 Bangumi 服务器（连接超时）。"
-                "请检查网络，或设置 BANGUMI_PROXY / BILIBILI_PROXY 代理后重试"
+                "请检查网络，或设置 BANGUMI_PROXY 代理后重试"
             )
             continue
         except requests.exceptions.ReadTimeout as exc:
@@ -303,7 +303,7 @@ def _request(
         except requests.exceptions.ProxyError as exc:
             raise BangumiNetworkError(
                 "代理连接失败。请检查代理配置"
-                "（BANGUMI_PROXY / BILIBILI_PROXY / 系统代理）是否正确可用"
+                "（BANGUMI_PROXY / 系统代理）是否正确可用"
             ) from exc
         except requests.exceptions.RequestException as exc:
             # 其它网络异常（DNS、连接被拒等）

@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import requests
 
-from bilibili_bangumi import config
-from bilibili_bangumi.api import bangumi as api_module
-from bilibili_bangumi.models.bangumi import SeasonDetail
+from bangumi_query import config
+from bangumi_query.api import bangumi as api_module
+from bangumi_query.models.bangumi import SeasonDetail
 
 from tests.fixtures import (
     CALENDAR_DATA,

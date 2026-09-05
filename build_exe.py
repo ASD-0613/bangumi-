@@ -7,7 +7,7 @@
 
 - ``--onefile``：单个 exe 便于分发；首次启动需自解压，稍慢属正常现象；
 - ``--windowed``：GUI 程序运行时不弹出黑色控制台窗口；
-- 版本号自动取自 ``bilibili_bangumi/config.py``（应用名/版本号唯一来源），
+- 版本号自动取自 ``bangumi_query/config.py``（应用名/版本号唯一来源），
   exe 名称与窗口标题保持一致；
 - 构建依赖：``pip install pyinstaller``（仅构建时需要；运行 exe 的用户
   无需安装 Python 与任何依赖）；
@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent
 # - matplotlib/numpy/pandas/zmq/tkinter 等：Anaconda 预装的科学计算栈，GUI 用不到；
 # - PyQt5 的 WebEngine/Quick/Network 等子模块：本程序只用 QtCore/QtGui/QtWidgets，
 #   联网走 requests。
-# 运行时安全性已验证：导入 bilibili_bangumi.main 后 sys.modules 不含以下任何模块。
+# 运行时安全性已验证：导入 bangumi_query.main 后 sys.modules 不含以下任何模块。
 EXCLUDES: list[str] = [
     "PySide6", "PySide2", "shiboken6", "qtpy",
     "matplotlib", "numpy", "pandas", "scipy", "zmq",
@@ -44,7 +44,7 @@ EXCLUDES: list[str] = [
 def main() -> int:
     os.chdir(ROOT)
     sys.path.insert(0, str(ROOT))
-    from bilibili_bangumi import config
+    from bangumi_query import config
 
     name = f"BangumiQuery-{config.VERSION}"
     exe_path = ROOT / "dist" / f"{name}.exe"
@@ -56,7 +56,7 @@ def main() -> int:
     entry = entry_dir / "_entry_gui.py"
     entry.write_text(
         "import sys\n"
-        "from bilibili_bangumi.main import main\n"
+        "from bangumi_query.main import main\n"
         "sys.exit(main())\n",
         encoding="utf-8",
     )

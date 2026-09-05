@@ -27,7 +27,7 @@ from typing import List, Tuple
 
 import requests
 
-from bilibili_bangumi import config
+from bangumi_query import config
 
 _HOST: str = "api.bgm.tv"
 _PORT: int = 443
@@ -58,7 +58,6 @@ def _env_block() -> List[str]:
     keys = (
         "BANGUMI_API_BASE",
         "BANGUMI_PROXY",
-        "BILIBILI_PROXY",
         "BANGUMI_CONNECT_TIMEOUT",
         "BANGUMI_READ_TIMEOUT",
         "BANGUMI_RETRY_TIMES",
@@ -77,7 +76,7 @@ def _env_block() -> List[str]:
     else:
         lines.append("    系统代理 = （未检测到）")
     lines.append(f"    当前 API 基址 = {config.BANGUMI_API_BASE}")
-    lines.append(f"    当前 User-Agent = BilibiliBangumiQuery/{config.VERSION}")
+    lines.append(f"    当前 User-Agent = BangumiQuery/{config.VERSION}")
     return lines
 
 
@@ -149,7 +148,7 @@ def _http_check() -> Tuple[bool, List[str]]:
         resp = requests.get(
             _PING_URL,
             headers={
-                "User-Agent": f"BilibiliBangumiQuery/{config.VERSION}",
+                "User-Agent": f"BangumiQuery/{config.VERSION}",
                 "Accept": "application/json",
             },
             timeout=(config.CONNECT_TIMEOUT, config.REQUEST_TIMEOUT),
@@ -174,7 +173,7 @@ def _http_check() -> Tuple[bool, List[str]]:
         return False, lines
     except requests.exceptions.ProxyError as exc:
         lines.append(f"    [失败] 代理错误：{exc}")
-        lines.append("       请检查 BANGUMI_PROXY / BILIBILI_PROXY / 系统代理是否可用")
+        lines.append("       请检查 BANGUMI_PROXY / 系统代理是否可用")
         return False, lines
     except requests.exceptions.ConnectionError as exc:
         lines.append(f"    [失败] 连接错误：{exc}")
@@ -199,7 +198,7 @@ def _summary(
         return "[失败] DNS 解析失败：请检查 DNS 设置，或换一个网络后重试。"
     return (
         "[失败] 无法通过 requests 访问 api.bgm.tv。请检查：本机是否可上网、"
-        "代理是否可用（BANGUMI_PROXY / BILIBILI_PROXY / 系统代理）、"
+        "代理是否可用（BANGUMI_PROXY / 系统代理）、"
         "防火墙/路由是否放行该域名；可尝试换网络后再运行本脚本。"
     )
 

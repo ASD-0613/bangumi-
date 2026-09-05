@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from bilibili_bangumi import main as gui  # noqa: E402
-from bilibili_bangumi.api import bangumi as api_module  # noqa: E402
+from bangumi_query import main as gui  # noqa: E402
+from bangumi_query.api import bangumi as api_module  # noqa: E402
 
 from tests.fixtures import (  # noqa: E402
     CALENDAR_DATA,
@@ -184,7 +184,7 @@ class GuiSmokeTest(unittest.TestCase):
         """底部“清除缓存”：清理磁盘缓存并成功弹窗提示。"""
         import tempfile
 
-        from bilibili_bangumi.utils import cache as disk_cache
+        from bangumi_query.utils import cache as disk_cache
 
         old_dir = os.environ.get("BANGUMI_CACHE_DIR")
         tmp = tempfile.TemporaryDirectory()

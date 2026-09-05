@@ -18,7 +18,7 @@
 
 启动方式：
     普通用户：直接运行 Release 页发布的单文件 exe（双击即用，无需 Python）；
-    开发调试：python -m bilibili_bangumi.main（需 PyQt5 + requests）；
+    开发调试：python -m bangumi_query.main（需 PyQt5 + requests）；
     打包 exe：python build_exe.py（见项目根目录脚本）。
 """
 
@@ -211,7 +211,6 @@ class ApiWorker(QThread):
     """在后台线程中运行一个返回协程的任务，结果经信号回传主线程。
 
     每次 ``run()`` 内部使用独立的 ``asyncio.run``（即独立事件循环）。
-    bilibili-api 会按事件循环缓存会话，因此多线程逐个请求是安全的。
     """
 
     succeeded = pyqtSignal(object)
@@ -257,7 +256,7 @@ class CoverWorker(QThread):
                 self._url,
                 headers={
                     "User-Agent": _USER_AGENT,
-                    "Referer": "https://www.bilibili.com/",
+                    "Referer": "https://bgm.tv/",
                 },
                 timeout=10,
             )

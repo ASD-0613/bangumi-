@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 
-from bilibili_bangumi.utils import cache as disk_cache
+from bangumi_query.utils import cache as disk_cache
 
 
 class TestDiskCache(unittest.TestCase):
