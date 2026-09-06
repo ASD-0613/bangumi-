@@ -342,6 +342,31 @@ class GuiSmokeTest(unittest.TestCase):
                 os.environ["BANGUMI_CACHE_DIR"] = old_dir
             tmp.cleanup()
 
+    def test_theme_switch_persists(self) -> None:
+        """主题下拉切换即时持久化，新窗口恢复所选主题。"""
+        import tempfile
+
+        from bangumi_query.utils import settings as settings_store
+
+        old_dir = os.environ.get("BANGUMI_CACHE_DIR")
+        tmp = tempfile.TemporaryDirectory()
+        os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
+        try:
+            w1 = gui.MainWindow()
+            self.assertEqual(w1._theme, "深色")
+            w1.theme_combo.setCurrentText("浅色")  # 触发即时保存
+            self.assertEqual(settings_store.load()["theme"], "浅色")
+            w2 = gui.MainWindow()
+            self.assertEqual(w2._theme, "浅色")
+            w1.close()
+            w2.close()
+        finally:
+            if old_dir is None:
+                os.environ.pop("BANGUMI_CACHE_DIR", None)
+            else:
+                os.environ["BANGUMI_CACHE_DIR"] = old_dir
+            tmp.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()

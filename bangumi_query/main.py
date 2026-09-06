@@ -35,12 +35,22 @@ from typing import Any, Awaitable, Callable, List, Optional, Sequence, Set, Tupl
 
 try:  # GUI 依赖检测：缺少时给出清晰的中文提示
     import requests  # noqa: F401 - 用于后台线程下载封面图
-    from PyQt5.QtCore import QPointF, QSize, QThread, Qt, pyqtSignal
+    from PyQt5.QtCore import (
+        QEvent,
+        QModelIndex,
+        QPointF,
+        QSize,
+        QThread,
+        Qt,
+        QTimer,
+        pyqtSignal,
+    )
     from PyQt5.QtGui import (
         QColor,
         QFont,
         QIcon,
         QImage,
+        QPalette,
         QPainter,
         QPen,
         QPixmap,
@@ -62,6 +72,9 @@ try:  # GUI 依赖检测：缺少时给出清晰的中文提示
         QMessageBox,
         QPushButton,
         QScrollArea,
+        QStyle,
+        QStyledItemDelegate,
+        QStyleOptionViewItem,
         QTableWidget,
         QTableWidgetItem,
         QTabWidget,
@@ -111,7 +124,7 @@ _COVER_COLUMN_WIDTH: int = _ROW_HEIGHT + 26
 # 全局深色主题（Steam 风格）：只声明颜色/边框/内边距，
 # 字体族与字号仍由 app.setFont 及各控件的 setFont 控制，
 # 避免覆盖表格 12pt、标题 16pt 等专用字号
-STYLE_SHEET: str = """
+STYLE_SHEET_DARK: str = """
 QWidget { background-color: #1b2733; color: #cfd8e3; }
 QLabel { background: transparent; }
 QMainWindow, QDialog { background-color: #141d26; }
@@ -175,11 +188,96 @@ QToolTip { background: #2a475e; color: #eaf2f8;
 QListWidget::item { padding: 4px; border-radius: 4px; }
 QListWidget::item:selected { background: #2a475e; color: #ffffff; }
 QListWidget::item:hover:!selected { background: #223444; }
+
+QPushButton:checked { background: #3fa34d; color: #ffffff;
+                      border: 1px solid #2c8a3e; }
+QPushButton:checked:hover { background: #4bb45c; }
+QLabel[hint="true"] { color: #8fa8bd; }
+QLabel[coverBox="true"] { border: 1px solid #32465c;
+    background-color: #141d26; color: #8fa8bd; border-radius: 4px; }
 """
 
+# 全局浅色主题：结构与深色一致，配色为浅色变体
+STYLE_SHEET_LIGHT: str = """
+QWidget { background-color: #f4f6f8; color: #2a3a48; }
+QLabel { background: transparent; }
+QMainWindow, QDialog { background-color: #eaeef2; }
 
-def _colorize_score_cells(table: Any, column: int) -> None:
-    """给“评分”列上色：≥9 金色、≥8 绿色（与命令行版配色一致）。"""
+QTabWidget::pane { border: 1px solid #c9d4dd; border-radius: 4px;
+                   background: #f4f6f8; top: -1px; }
+QTabBar::tab { background: #dde5ec; color: #55677a; padding: 7px 18px;
+               border-top-left-radius: 4px; border-top-right-radius: 4px;
+               margin-right: 3px; }
+QTabBar::tab:selected { background: #ffffff; color: #14314a; }
+QTabBar::tab:hover:!selected { background: #e8eef4; color: #2a3a48; }
+
+QTableWidget, QTreeWidget, QListWidget {
+    background: #ffffff; alternate-background-color: #f2f6f9;
+    border: 1px solid #c9d4dd; border-radius: 4px;
+    gridline-color: #dfe7ee; selection-background-color: #cfe4f7;
+    selection-color: #14314a; }
+QHeaderView::section { background: #e6ecf1; color: #44586b; border: none;
+    border-right: 1px solid #d5dee6; border-bottom: 2px solid #c9d4dd;
+    padding: 6px; }
+QTableCornerButton::section { background: #e6ecf1; border: none; }
+
+QLineEdit { background: #ffffff; border: 1px solid #c9d4dd;
+            border-radius: 4px; padding: 6px 10px; color: #1f2d3a;
+            selection-background-color: #cfe4f7; }
+QLineEdit:focus { border: 1px solid #3d84c6; }
+
+QPushButton { background: #e3eaf0; color: #2a3a48;
+              border: 1px solid #c4d0da; border-radius: 4px;
+              padding: 6px 14px; }
+QPushButton:hover { background: #d7e2eb; border-color: #3d84c6; }
+QPushButton:pressed { background: #c9d6e2; }
+QPushButton:disabled { background: #eef1f4; color: #9aa7b2;
+                       border-color: #dbe2e8; }
+
+QComboBox { background: #ffffff; border: 1px solid #c9d4dd;
+            border-radius: 4px; padding: 4px 10px; color: #1f2d3a; }
+QComboBox:hover { border: 1px solid #3d84c6; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView { background: #ffffff; color: #2a3a48;
+    selection-background-color: #cfe4f7; selection-color: #14314a; }
+
+QTextBrowser { background: #ffffff; border: 1px solid #c9d4dd;
+               border-radius: 4px; color: #2a3a48; }
+
+QScrollBar:vertical { background: #eef1f4; width: 10px; margin: 0; }
+QScrollBar::handle:vertical { background: #b9c6d1; border-radius: 5px;
+                              min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #8fa8bd; }
+QScrollBar:horizontal { background: #eef1f4; height: 10px; margin: 0; }
+QScrollBar::handle:horizontal { background: #b9c6d1; border-radius: 5px;
+                                min-width: 30px; }
+QScrollBar::handle:horizontal:hover { background: #8fa8bd; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+QStatusBar { background: #eaeef2; color: #66727d; }
+QToolTip { background: #ffffff; color: #1f2d3a;
+           border: 1px solid #3d84c6; padding: 4px; }
+
+QListWidget::item { padding: 4px; border-radius: 4px; }
+QListWidget::item:selected { background: #cfe4f7; color: #14314a; }
+QListWidget::item:hover:!selected { background: #e8f0f7; }
+
+QPushButton:checked { background: #3fa34d; color: #ffffff;
+                      border: 1px solid #2c7a3a; }
+QPushButton:checked:hover { background: #4bb45c; }
+QLabel[hint="true"] { color: #66727d; }
+QLabel[coverBox="true"] { border: 1px solid #c9d4dd;
+    background-color: #ffffff; color: #8a97a3; border-radius: 4px; }
+"""
+
+# 可选主题（键即界面下拉框里的显示名，存入 settings.json 的 "theme" 键）
+THEMES: Dict[str, str] = {"深色": STYLE_SHEET_DARK, "浅色": STYLE_SHEET_LIGHT}
+
+
+def _colorize_score_cells(table: Any, column: int,
+                          gold: str, green: str) -> None:
+    """给“评分”列上色：≥9 金色、≥8 绿色（颜色随主题提供）。"""
     for row in range(table.rowCount()):
         item = table.item(row, column)
         if item is None:
@@ -189,9 +287,9 @@ def _colorize_score_cells(table: Any, column: int) -> None:
         except ValueError:
             continue
         if score >= 9.0:
-            item.setForeground(QColor("#ffd45e"))
+            item.setForeground(QColor(gold))
         elif score >= 8.0:
-            item.setForeground(QColor("#8fd08f"))
+            item.setForeground(QColor(green))
 
 
 def format_score(score: Optional[float]) -> str:
@@ -414,6 +512,76 @@ class WatchedCheckBox(QPushButton):
         painter.drawPolyline(QPolygonF(pts))
 
 
+class MarqueeNameDelegate(QStyledItemDelegate):
+    """追番日历“番剧名称”列代理：悬停且文本超宽时横向循环滚动显示全名。
+
+    非悬停或文本可完整显示时按默认方式绘制；悬停超宽时自绘背景并以
+    跑马灯方式滚动文本（两份文本 + 间隔循环拼接，视觉无缝）。
+    """
+
+    _GAP = 32          # 滚动文本两份之间的间隔（px）
+    _SPEED = 2         # 每次心跳前进的像素
+    _INTERVAL_MS = 40  # 心跳间隔
+
+    def __init__(self, parent: Any) -> None:
+        super().__init__(parent)
+        self._hover_row: Optional[int] = None
+        self._offset: int = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(self._INTERVAL_MS)
+        self._timer.timeout.connect(self._tick)
+
+    def set_hover_row(self, row: Optional[int]) -> None:
+        """设置当前悬停的行；None 表示鼠标已离开列表。"""
+        if row != self._hover_row:
+            self._hover_row = row
+            self._offset = 0
+            if row is None:
+                self._timer.stop()
+            else:
+                self._timer.start()
+        self.parent().viewport().update()
+
+    def reset(self) -> None:
+        """列表重建后清除悬停状态。"""
+        self._hover_row = None
+        self._offset = 0
+        self._timer.stop()
+
+    def _tick(self) -> None:
+        self._offset += self._SPEED
+        self.parent().viewport().update()
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem,
+              index: QModelIndex) -> None:
+        text = index.data(Qt.DisplayRole) or ""
+        metrics = option.fontMetrics
+        text_w = metrics.horizontalAdvance(text)
+        avail = option.rect.width() - 12
+        if not text or self._hover_row != index.row() or text_w <= avail:
+            super().paint(painter, option, index)
+            return
+        # 悬停且超宽：自绘背景 + 循环滚动文本
+        painter.save()
+        painter.setClipRect(option.rect)
+        if option.state & QStyle.State_Selected:
+            background = option.palette.color(QPalette.Highlight)
+            foreground = option.palette.color(QPalette.HighlightedText)
+        else:
+            background = option.palette.color(QPalette.Base)
+            foreground = option.palette.color(QPalette.Text)
+        painter.fillRect(option.rect, background)
+        painter.setPen(foreground)
+        loop = text_w + self._GAP
+        x = option.rect.left() + 6 - (self._offset % loop)
+        y = (option.rect.top()
+             + (option.rect.height() - metrics.height()) // 2
+             + metrics.ascent())
+        painter.drawText(QPoint(int(x), int(y)), text)
+        painter.drawText(QPoint(int(x + loop), int(y)), text)
+        painter.restore()
+
+
 # ---------------------------------------------------------------------------
 # 主窗口
 # ---------------------------------------------------------------------------
@@ -474,6 +642,8 @@ class MainWindow(QMainWindow):
         self._saved_settings: Dict[str, Any] = settings_store.load()
         self._col_widths_user: Set[str] = set()
         self._widths_programmatic: bool = False
+        # 当前主题（深色/浅色），与底部下拉框联动并持久化
+        self._theme: str = str(self._saved_settings.get("theme", "深色"))
         # 排行榜渐进式加载：首屏一个请求，后台逐页补全候选池
         self._rank_pool_raw: List[Dict[str, Any]] = []
         self._rank_pool_next_offset: int = 0
@@ -523,12 +693,20 @@ class MainWindow(QMainWindow):
         tab_bar.setFont(tab_font)
         root.addWidget(self.tabs, stretch=1)
 
-        # 底部：本地缓存占用提示 + 清除缓存按钮
+        # 底部：主题切换 + 本地缓存占用提示 + 清除缓存按钮
         bottom_bar = QHBoxLayout()
-        self.cache_info_label = QLabel("")
-        self.cache_info_label.setStyleSheet("color: #8fa8bd;")
-        bottom_bar.addWidget(self.cache_info_label)
+        bottom_bar.addWidget(QLabel("主题："))
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(list(THEMES.keys()))
+        if self._theme not in THEMES:
+            self._theme = "深色"
+        self.theme_combo.setCurrentText(self._theme)
+        self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
+        bottom_bar.addWidget(self.theme_combo)
         bottom_bar.addStretch(1)
+        self.cache_info_label = QLabel("")
+        self.cache_info_label.setProperty("hint", True)
+        bottom_bar.addWidget(self.cache_info_label)
         self.clear_cache_button = QPushButton("清除缓存")
         self.clear_cache_button.clicked.connect(self.on_clear_cache)
         bottom_bar.addWidget(self.clear_cache_button)
@@ -611,7 +789,7 @@ class MainWindow(QMainWindow):
 
         self.detail_subtitle = QLabel("")
         self.detail_subtitle.setWordWrap(True)
-        self.detail_subtitle.setStyleSheet("color: #8fa8bd;")
+        self.detail_subtitle.setProperty("hint", True)
         outer.addWidget(self.detail_subtitle)
 
         # 封面 + 基本信息
@@ -620,10 +798,7 @@ class MainWindow(QMainWindow):
         self.cover_label.setAlignment(Qt.AlignCenter)
         self.cover_label.setMinimumSize(150, 200)
         self.cover_label.setMaximumSize(190, 280)
-        self.cover_label.setStyleSheet(
-            "border: 1px solid #32465c; background-color: #141d26;"
-            "color: #8fa8bd; border-radius: 4px;"
-        )
+        self.cover_label.setProperty("coverBox", True)
         head.addWidget(self.cover_label, alignment=Qt.AlignTop)
 
         self.detail_info_table = QTableWidget(0, 2)
@@ -667,7 +842,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.detail_episode_table)
         # 分集超出展示上限时的截断提示（CLI 版有，GUI 版此前缺失）
         self.detail_episode_hint = QLabel("")
-        self.detail_episode_hint.setStyleSheet("color: #8fa8bd;")
+        self.detail_episode_hint.setProperty("hint", True)
         self.detail_episode_hint.setWordWrap(True)
         outer.addWidget(self.detail_episode_hint)
 
@@ -795,6 +970,14 @@ class MainWindow(QMainWindow):
         self.timeline_tree.header().sectionResized.connect(
             lambda i, o, n: self._on_section_resized("timeline", i, o, n)
         )
+        # 番剧名称列：悬停且名称超宽时横向滚动显示全名
+        self._name_delegate = MarqueeNameDelegate(self.timeline_tree)
+        self.timeline_tree.setItemDelegateForColumn(1, self._name_delegate)
+        self.timeline_tree.itemEntered.connect(
+            lambda item, _col: self._name_delegate.set_hover_row(
+                self.timeline_tree.indexOfTopLevelItem(item))
+        )
+        self.timeline_tree.viewport().installEventFilter(self)
         layout.addWidget(self.timeline_tree, stretch=1)
 
         # 默认高亮“今天”，列宽在首次渲染与窗口缩放时自适应
@@ -808,7 +991,7 @@ class MainWindow(QMainWindow):
 
         bar = QHBoxLayout()
         self.watched_hint = QLabel("在番剧详情页标题右侧的方框打钩，即可加入本页")
-        self.watched_hint.setStyleSheet("color: #8fa8bd;")
+        self.watched_hint.setProperty("hint", True)
         bar.addWidget(self.watched_hint)
         bar.addStretch(1)
         layout.addLayout(bar)
@@ -1082,7 +1265,7 @@ class MainWindow(QMainWindow):
             [""] + search_row_values(item) for item in self._search_items
         ]
         self._fill_table(self.search_table, rows)
-        _colorize_score_cells(self.search_table, 5)
+        _colorize_score_cells(self.search_table, 5, *self._score_colors())
         for row_idx, _item in enumerate(self._search_items):
             cover_cell = self.search_table.item(row_idx, 0)
             if cover_cell is not None:
@@ -1530,7 +1713,7 @@ class MainWindow(QMainWindow):
                         cell.setIcon(QIcon(pix))
                     cell.setTextAlignment(Qt.AlignCenter)
                 self.rank_table.setItem(row_idx, col_idx, cell)
-        _colorize_score_cells(self.rank_table, 4)  # 评分列
+        _colorize_score_cells(self.rank_table, 4, *self._score_colors())
 
         # 列宽：用户已手动调过且列数未变 → 保留用户的列宽；
         # 列数变化（切换排序维度）→ 回到默认铺排，待关闭时重新记忆
@@ -1694,6 +1877,7 @@ class MainWindow(QMainWindow):
     def _render_timeline_day(self) -> None:
         """渲染当前选中星期的条目：无折叠分组，直接平铺为数据行。"""
         self.timeline_tree.clear()
+        self._name_delegate.reset()  # 列表重建，清除跑马灯悬停状态
         self._apply_timeline_widths()
         day = self._selected_timeline_day()
         if day is None:
@@ -1867,11 +2051,27 @@ class MainWindow(QMainWindow):
             self.watched_grid.addItem(item)
         self._ensure_watched_covers(items)
 
-    @staticmethod
-    def _placeholder_pixmap() -> QPixmap:
-        """封面未就绪时的占位图（深色主题配色）。"""
+    def _score_colors(self) -> Tuple[str, str]:
+        """评分档位配色（金/绿），随主题切换。"""
+        if self._theme == "浅色":
+            return "#b8860b", "#3f8f3f"
+        return "#ffd45e", "#8fd08f"
+
+    def _on_theme_changed(self, theme: str) -> None:
+        """底部主题下拉：即时切换并记忆（评分列同步重新着色）。"""
+        self._theme = theme
+        settings_store.update(theme=theme)
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(THEMES.get(theme, STYLE_SHEET_DARK))
+        gold, green = self._score_colors()
+        _colorize_score_cells(self.search_table, 5, gold, green)
+        _colorize_score_cells(self.rank_table, 4, gold, green)
+
+    def _placeholder_pixmap(self) -> QPixmap:
+        """封面未就绪时的占位图（配色随主题）。"""
         pm = QPixmap(176, 248)
-        pm.fill(QColor("#243443"))
+        pm.fill(QColor("#dfe6ec") if self._theme == "浅色" else QColor("#243443"))
         return pm
 
     def _ensure_watched_covers(self, items: Sequence[Dict[str, Any]]) -> None:
@@ -1955,6 +2155,14 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - 偏好保存失败不影响退出
             pass
 
+    def eventFilter(self, obj: Any, event: Any) -> bool:
+        """鼠标离开追番日历视口时停止名称跑马灯。"""
+        if (hasattr(self, "timeline_tree")
+                and obj is self.timeline_tree.viewport()
+                and event.type() == QEvent.Leave):
+            self._name_delegate.set_hover_row(None)
+        return super().eventFilter(obj, event)
+
     def resizeEvent(self, event: Any) -> None:
         """窗口缩放时同步调整追番日历列宽（番剧名称列≈一半）。"""
         super().resizeEvent(event)
@@ -2016,8 +2224,9 @@ def main() -> int:
     # 全局字体用微软雅黑：Windows 默认字体渲染中文发虚，雅黑明显更清晰；
     # 各控件的专用字体（表格 12pt、标题 16pt 等）在此基础之上覆盖
     app.setFont(QFont("Microsoft YaHei UI", 10))
-    # 全局深色主题（Steam 风格）
-    app.setStyleSheet(STYLE_SHEET)
+    # 全局主题（深色/浅色，记忆于 settings.json）
+    theme = str(settings_store.load().get("theme", "深色"))
+    app.setStyleSheet(THEMES.get(theme, STYLE_SHEET_DARK))
     icon = _app_icon()
     if icon is not None:
         app.setWindowIcon(icon)  # 窗口/任务栏图标
