@@ -23,6 +23,7 @@ import sys
 import time
 import zipfile
 from pathlib import Path
+from typing import Dict
 
 import requests
 
@@ -164,6 +165,7 @@ def main() -> int:
             if up.status_code in (200, 201):
                 print(f"[完成] {up.json()['browser_download_url']}")
                 print(f"Release 就绪：{html}")
+                _set_default_branch(headers, tag)
                 return 0
             print(f"  HTTP {up.status_code}: {up.json().get('message', '')[:200]}")
         except requests.RequestException as exc:
@@ -171,6 +173,23 @@ def main() -> int:
         time.sleep(8)
     print("[失败] 附件上传多次失败——Release 已存在，可稍后手动补传附件")
     return 1
+
+
+def _set_default_branch(headers: Dict[str, str], tag: str) -> None:
+    """把仓库默认分支指向本次发布的版号分支（策略：默认分支跟随最新版）。"""
+    try:
+        rr = requests.patch(
+            f"https://api.github.com/repos/{REPO}",
+            headers=headers, json={"default_branch": tag},
+            timeout=(30, 120),
+        )
+        if rr.status_code == 200:
+            print(f"[repo] 默认分支已设为 {tag}")
+        else:
+            print(f"[repo] 默认分支设置失败：HTTP {rr.status_code} "
+                  f"{rr.json().get('message', '')[:120]}")
+    except requests.RequestException as exc:
+        print(f"[repo] 默认分支设置异常：{type(exc).__name__}（不影响 Release）")
 
 
 if __name__ == "__main__":
