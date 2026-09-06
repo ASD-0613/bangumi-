@@ -38,17 +38,12 @@ try:  # GUI 依赖检测：缺少时给出清晰的中文提示
     import requests  # noqa: F401 - 用于后台线程下载封面图
     from PyQt5.QtCore import QEvent, QPoint, QSize, QThread, Qt, QTimer, pyqtSignal
     from PyQt5.QtGui import (
-        QBrush,
         QColor,
         QFont,
         QIcon,
         QImage,
-        QLinearGradient,
-        QPalette,
-        QPainter,
         QPen,
         QPixmap,
-        QPolygonF,
     )
     from PyQt5.QtWidgets import (
         QAbstractItemView,
@@ -190,6 +185,11 @@ QLabel[hint="true"] { color: #8fa8bd; }
 QLabel[coverBox="true"] { border: 1px solid #32465c;
     background-color: #141d26; color: #8fa8bd; border-radius: 4px; }
 QWidget[marquee="true"] { background: #17222d; border: 1px solid #32465c; }
+
+QPushButton#watchedCheck { border: 3px solid #000000; border-radius: 9px;
+    background: #ffffff; color: #c9c9c9; font-size: 20px; font-weight: bold; }
+QPushButton#watchedCheck:checked { background: #3fa34d; color: #000000;
+    border: 3px solid #000000; font-size: 23px; }
 """
 
 # 全局浅色主题：结构与深色一致，配色为浅色变体
@@ -265,6 +265,11 @@ QLabel[hint="true"] { color: #66727d; }
 QLabel[coverBox="true"] { border: 1px solid #c9d4dd;
     background-color: #ffffff; color: #8a97a3; border-radius: 4px; }
 QWidget[marquee="true"] { background: #ffffff; border: 1px solid #c9d4dd; }
+
+QPushButton#watchedCheck { border: 3px solid #000000; border-radius: 9px;
+    background: #ffffff; color: #c9c9c9; font-size: 20px; font-weight: bold; }
+QPushButton#watchedCheck:checked { background: #3fa34d; color: #000000;
+    border: 3px solid #000000; font-size: 23px; }
 """
 
 # 可选主题（键即界面下拉框里的显示名，存入 settings.json 的 "theme" 键）
@@ -466,57 +471,25 @@ class CoverWorker(QThread):
 
 
 class WatchedCheckBox(QPushButton):
-    """详情页“已看完”打钩框：粗黑边圆角正方形方框。
+    """详情页“已看完”打钩框：粗黑边圆角正方形方框（纯 QSS 实现）。
 
     - 未选中：白底 + 浅灰色钩；
-    - 选中：粗黑边 + 绿色底，钩变纯黑并稍微放大。
+    - 选中：绿底 + 纯黑钩，钩稍微放大。
+    不重写 paintEvent（自定义绘制曾触发 Qt 内部 qFatal 闪退），
+    外观完全由 QSS（QPushButton#watchedCheck）控制。
     """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        # 纯 QSS 实现（粗黑边圆角方框 + 钩字符），不重写 paintEvent：
+        # 自定义绘制在真实渲染环境下会触发 Qt 内部 qFatal 闪退
+        self.setObjectName("watchedCheck")
+        self.setText("✓")
         self.setCheckable(True)
         self.setFixedSize(44, 44)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("标记为已看完")
 
-    def paintEvent(self, event: Any) -> None:  # noqa: N802 - Qt 命名约定
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect = self.rect().adjusted(2, 2, -2, -2)
-
-        # 圆角正方形框：粗黑边；选中时绿底（ACCENT_GREEN，与星期选中一致，
-        # 叠加轻微纵向渐变提升质感）
-        painter.setPen(QPen(QColor("#000000"), 3))
-        if self.isChecked():
-            base = QColor(ACCENT_GREEN)
-            grad = QLinearGradient(0, rect.top(), 0, rect.bottom())
-            grad.setColorAt(0.0, base.lighter(115))
-            grad.setColorAt(1.0, base.darker(115))
-            painter.setBrush(QBrush(grad))
-        else:
-            painter.setBrush(QColor("#ffffff"))
-        painter.drawRoundedRect(rect, 9, 9)
-
-        # 钩形折线：选中时纯黑且放大 1.18 倍（围绕中心缩放）
-        w, h = self.width(), self.height()
-        cx, cy = w / 2.0, h / 2.0
-        scale = 1.18 if self.isChecked() else 1.0
-        raw = [(0.26 * w, 0.53 * h), (0.43 * w, 0.69 * h), (0.75 * w, 0.33 * h)]
-        pts = [QPointF(cx + (x - cx) * scale, cy + (y - cy) * scale)
-               for x, y in raw]
-        check_pen = QPen(
-            QColor("#000000" if self.isChecked() else "#c9c9c9"),
-            4.5 if self.isChecked() else 3.5,
-        )
-        check_pen.setCapStyle(Qt.RoundCap)
-        check_pen.setJoinStyle(Qt.RoundJoin)
-        painter.setPen(check_pen)
-        painter.drawPolyline(QPolygonF(pts))
-
-
-# ---------------------------------------------------------------------------
-# 主窗口
-# ---------------------------------------------------------------------------
 
 
 class MainWindow(QMainWindow):
@@ -1310,6 +1283,7 @@ class MainWindow(QMainWindow):
             return
         if season_id == self._detail_pending_id:
             return  # 同一条目正在加载
+        print("[open1] 进入", flush=True)
         self._detail_token += 1
         token = self._detail_token
         self._detail_pending_id = season_id
@@ -1322,6 +1296,7 @@ class MainWindow(QMainWindow):
         self.detail_info_table.setRowCount(0)
         self.detail_intro.setPlainText("")
         self.detail_staff.setPlainText("")
+        print("[open2] UI 复位完成", flush=True)
         self.detail_episode_table.setRowCount(0)
         self.detail_episode_hint.setText("")
         self._detail_current = None
@@ -1329,8 +1304,10 @@ class MainWindow(QMainWindow):
         self.watched_check.setChecked(False)
         self.watched_check.blockSignals(False)
         self.watched_check.setEnabled(False)
+        print("[open3] 切换页签前", flush=True)
         self.tabs.setCurrentIndex(1)
         self._busy(f"正在获取番剧详情（season_id={season_id}）…")
+        print("[open4] 启动后台线程前", flush=True)
 
         worker = ApiWorker(lambda sid=season_id: api.get_season_detail(sid))
 
@@ -1351,6 +1328,7 @@ class MainWindow(QMainWindow):
         worker.succeeded.connect(on_ok)
         worker.failed.connect(on_err)
         self._register(worker)
+        print("[open5] 线程已启动", flush=True)
 
     def _render_detail(self, detail: SeasonDetail) -> None:
         """在主线程用详情数据刷新界面。"""
