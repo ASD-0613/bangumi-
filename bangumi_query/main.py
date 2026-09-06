@@ -534,6 +534,21 @@ class FixedWheelTableWidget(_FixedWheelMixin, QTableWidget):
     """基本信息 / 分集列表框（细滚动条 + 阻断滚动链）。"""
 
 
+def _set_cell_tooltips(table: Any) -> None:
+    """给表格单元格补悬停提示：文本可能被裁剪时，悬停显示全文（轻量）。"""
+    metrics = table.fontMetrics()
+    for row in range(table.rowCount()):
+        for col in range(table.columnCount()):
+            item = table.item(row, col)
+            if item is None:
+                continue
+            text = item.text()
+            if text and metrics.horizontalAdvance(text) > table.columnWidth(col) - 10:
+                item.setToolTip(text)
+            else:
+                item.setToolTip("")
+
+
 def make_state_pill(large: bool = False):
     """构造“正在看 | 已看完”双段选择器（互斥、可再次点击取消）。
 
@@ -960,30 +975,8 @@ class MainWindow(QMainWindow):
         self.timeline_tree.header().sectionResized.connect(
             lambda i, o, n: self._on_section_resized("timeline", i, o, n)
         )
-        # 番剧名称列：悬停且名称超宽时显示跑马灯浮层（滚动展示全名）。
-        # 注意：不使用自定义绘制委托——真实环境下委托绘制路径曾触发
-        # Qt 内部 qFatal 闪退；浮层是标准控件，无此风险。
-        self._marquee_box = QWidget(self.timeline_tree.viewport())
-        self._marquee_box.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        # 纯裁剪容器：无背景无边框（视觉上没有“框”），
-        # 只负责把滚动文字裁剪在名称单元格内
-        self._marquee_label = QLabel(self._marquee_box)
-        self._marquee_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self._marquee_label.hide()
-        self._marquee_title = ""
-        self._marquee_offset = 0
-        self._marquee_timer = QTimer(self)
-        self._marquee_timer.setInterval(40)
-        self._marquee_timer.timeout.connect(self._marquee_tick)
-        # 悬停判定需要鼠标追踪：否则视图不派发移动事件，跑马灯无法触发
-        self.timeline_tree.setMouseTracking(True)
-        self.timeline_tree.viewport().setMouseTracking(True)
-        self.timeline_tree.viewport().installEventFilter(self)
-        # 滚动内容时行位置变化，直接隐藏浮层（下次悬停再显示）
-        self.timeline_tree.verticalScrollBar().valueChanged.connect(
-            lambda _v: self._hide_marquee())
-        self.timeline_tree.horizontalScrollBar().valueChanged.connect(
-            lambda _v: self._hide_marquee())
+        # 番剧名称列：名称超宽时悬停显示完整标题（轻量 tooltip，
+        # 不做跑马灯——此前的滚动/绘制方案在真实渲染环境不稳定）
         layout.addWidget(self.timeline_tree, stretch=1)
 
         # 默认高亮“今天”，列宽在首次渲染与窗口缩放时自适应
@@ -1269,6 +1262,7 @@ class MainWindow(QMainWindow):
         ]
         self._fill_table(self.search_table, rows)
         _colorize_score_cells(self.search_table, 5, *self._score_colors())
+        _set_cell_tooltips(self.search_table)
         for row_idx, _item in enumerate(self._search_items):
             cover_cell = self.search_table.item(row_idx, 0)
             if cover_cell is not None:
@@ -1486,6 +1480,7 @@ class MainWindow(QMainWindow):
         for r, (k, v) in enumerate(rows):
             self.detail_info_table.setItem(r, 0, QTableWidgetItem(k))
             self.detail_info_table.setItem(r, 1, QTableWidgetItem(v))
+        _set_cell_tooltips(self.detail_info_table)
 
         # 简介 / 声优制作 / 分集
         self.detail_intro.setPlainText(detail.evaluate or "暂无简介")
@@ -1503,6 +1498,7 @@ class MainWindow(QMainWindow):
             values = episode_row_values(ep, idx)
             for c, value in enumerate(values):
                 self.detail_episode_table.setItem(idx - 1, c, QTableWidgetItem(value))
+        _set_cell_tooltips(self.detail_episode_table)
         # 表格高度：内容多时最高 600px（约可见 13~15 行），少时也保底 240px，
         # 整页仍可在滚动区里滚动
         row_h = self.detail_episode_table.verticalHeader().defaultSectionSize()
@@ -1763,6 +1759,7 @@ class MainWindow(QMainWindow):
                     cell.setTextAlignment(Qt.AlignCenter)
                 self.rank_table.setItem(row_idx, col_idx, cell)
         _colorize_score_cells(self.rank_table, 4, *self._score_colors())
+        _set_cell_tooltips(self.rank_table)
 
         # 列宽：用户已手动调过且列数未变 → 保留用户的列宽；
         # 列数变化（切换排序维度）→ 回到默认铺排，待关闭时重新记忆
@@ -1926,7 +1923,6 @@ class MainWindow(QMainWindow):
     def _render_timeline_day(self) -> None:
         """渲染当前选中星期的条目：无折叠分组，直接平铺为数据行。"""
         self.timeline_tree.clear()
-        self._hide_marquee()  # 列表重建，隐藏跑马灯浮层
         self._apply_timeline_widths()
         day = self._selected_timeline_day()
         if day is None:
@@ -1948,6 +1944,7 @@ class MainWindow(QMainWindow):
             row.setSizeHint(0, QSize(0, _ROW_HEIGHT))
             row.setData(1, Qt.UserRole, item.season_id)
             row.setTextAlignment(0, Qt.AlignCenter)  # 封面图标居中
+            row.setToolTip(1, item.title or "")
             if item.season_id in self._first_date_cache:
                 cached = self._first_date_cache.get(item.season_id)
                 row.setText(2, cached or "—")
@@ -2174,6 +2171,7 @@ class MainWindow(QMainWindow):
             item.setData(Qt.UserRole, sid)
             item.setSizeHint(QSize(196, 316))
             item.setTextAlignment(Qt.AlignHCenter)
+            item.setToolTip(it["title"] or "")
             if sid in self._watched_icons:
                 item.setIcon(QIcon(self._watched_icons[sid]))
             else:
@@ -2295,78 +2293,6 @@ class MainWindow(QMainWindow):
             )
         except Exception:  # noqa: BLE001 - 偏好保存失败不影响退出
             pass
-
-    def eventFilter(self, obj: Any, event: Any) -> bool:
-        """追番日历视口：移动=更新悬停跑马灯浮层，离开=隐藏浮层。"""
-        if hasattr(self, "timeline_tree") and obj is self.timeline_tree.viewport():
-            if event.type() == QEvent.MouseMove:
-                self._update_marquee(self.timeline_tree.itemAt(event.pos()))
-            elif event.type() == QEvent.Leave:
-                self._hide_marquee()
-        return super().eventFilter(obj, event)
-
-    def _update_marquee(self, item: Optional[QTreeWidgetItem]) -> None:
-        """悬停行：名称超宽时在名称单元格上方显示滚动浮层。"""
-        if item is None:
-            self._hide_marquee()
-            return
-        row_rect = self.timeline_tree.visualItemRect(item)
-        pos_ok = row_rect.height() > 0 and row_rect.width() > 0
-        if not pos_ok:
-            self._hide_marquee()
-            return
-        title = item.text(1) or ""
-        header = self.timeline_tree.header()
-        cell_w = header.sectionSize(1) - 10
-        text_w = self.timeline_tree.fontMetrics().horizontalAdvance(title)
-        if not title or text_w <= cell_w:
-            self._hide_marquee()  # 名称能完整显示，无需跑马灯
-            return
-        x = header.sectionViewportPosition(1) + 5
-        y = row_rect.top() + 2
-        w = header.sectionSize(1) - 10
-        h = row_rect.height() - 4
-        self._marquee_box.setGeometry(x, y, w, h)
-        if self._marquee_title != title:
-            self._marquee_title = title
-            self._marquee_offset = 0
-            # 无框纯文字：底色与所在行完全一致（隔行底色/选中色自适应），
-            # 视觉上只有文字在滚动
-            if item.isSelected():
-                bg = self.timeline_tree.palette().color(QPalette.Highlight)
-                fg = self.timeline_tree.palette().color(
-                    QPalette.HighlightedText)
-            else:
-                key = (QPalette.Base
-                       if self.timeline_tree.indexOfTopLevelItem(item) % 2 == 0
-                       else QPalette.AlternateBase)
-                bg = self.timeline_tree.palette().color(key)
-                fg = self.timeline_tree.palette().color(QPalette.Text)
-            self._marquee_label.setStyleSheet(
-                f"background-color: {bg.name()}; color: {fg.name()};")
-            self._marquee_label.setText(f"{title}　　{title}")
-            self._marquee_label.adjustSize()
-            self._marquee_label.move(
-                0, max(0, (h - self._marquee_label.height()) // 2))
-        self._marquee_box.show()
-        self._marquee_label.show()
-        if not self._marquee_timer.isActive():
-            self._marquee_timer.start()
-
-    def _marquee_tick(self) -> None:
-        """跑马灯心跳：文字整体左移，滚出后从右侧重新进入（无缝循环）。"""
-        if not self._marquee_title:
-            self._marquee_timer.stop()
-            return
-        label_w = self._marquee_label.width()
-        loop = label_w + 24
-        self._marquee_offset = (self._marquee_offset + 2) % loop
-        self._marquee_label.move(-self._marquee_offset, self._marquee_label.y())
-
-    def _hide_marquee(self) -> None:
-        """隐藏跑马灯浮层并停止滚动。"""
-        self._marquee_box.hide()
-        self._marquee_timer.stop()
 
     def resizeEvent(self, event: Any) -> None:
         """窗口缩放时同步调整追番日历列宽（番剧名称列≈一半）。"""

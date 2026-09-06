@@ -164,6 +164,7 @@ class GuiSmokeTest(unittest.TestCase):
             row = tree.topLevelItem(0)
             self.assertEqual(row.data(1, Qt.UserRole), 5001)
             self.assertEqual(row.text(1), "周一更新作品")
+            self.assertEqual(row.toolTip(1), "周一更新作品")  # 悬停显示全名
             self.assertEqual(tree.headerItem().text(2), "开播时间")
             app = QApplication.instance()
             for _ in range(80):
@@ -377,67 +378,6 @@ class GuiSmokeTest(unittest.TestCase):
             else:
                 os.environ["BANGUMI_CACHE_DIR"] = old_dir
             tmp.cleanup()
-
-    def test_timeline_marquee_hover(self) -> None:
-        """追番日历：悬停超宽名称行 → 跑马灯浮层显示并滚动；离开即隐藏。
-
-        环境隔离：本测试关闭窗口会触发列宽持久化，不能污染真实设置；
-        名称本身使用超长标题，默认列宽下必然溢出（不缩列宽）。
-        """
-        import tempfile
-        from PyQt5.QtCore import QEvent, QPoint
-        from PyQt5.QtGui import QMouseEvent
-        from bangumi_query.models.bangumi import TimelineDay, TimelineItem
-
-        long_title = ("无职转生 ～到了异世界就拿出真本事～ 第三季 特别版"
-                      "超长名称测试用例超长名称测试用例")
-        day = TimelineDay(date="", weekday=1, weekday_cn="周一",
-                          is_today=False, items=[
-                              TimelineItem(season_id=1, title=long_title,
-                                           cover="", pub_time="",
-                                           ep_label="", category="动画")])
-        old_dir = os.environ.get("BANGUMI_CACHE_DIR")
-        tmp = tempfile.TemporaryDirectory()
-        os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
-        try:
-            self.window._timeline_days = [day]
-            self.window._timeline_selected = 1
-            self.window._render_timeline_day()
-            self.window.show()
-            self.window.resize(1100, 760)
-            self.window.tabs.setCurrentIndex(3)  # 切到日历页签（否则视口为零）
-            app = QApplication.instance()
-            for _ in range(30):
-                app.processEvents()
-                time.sleep(0.005)
-            # 名称超长，默认列宽下必然溢出
-            row = self.window.timeline_tree.topLevelItem(0)
-            rect = self.window.timeline_tree.visualItemRect(row)
-            center = (rect.center() if rect.width() > 0 and rect.height() > 0
-                      else QPoint(200, 80))
-            ev = QMouseEvent(QEvent.MouseMove, center, Qt.NoButton,
-                             Qt.NoButton, Qt.NoModifier)
-            QApplication.sendEvent(self.window.timeline_tree.viewport(), ev)
-            self.assertTrue(self.window._marquee_box.isVisible())
-            self.assertTrue(self.window._marquee_timer.isActive())
-            offset1 = self.window._marquee_offset
-            for _ in range(10):
-                app.processEvents()
-                time.sleep(0.02)
-            self.assertGreater(self.window._marquee_offset, offset1)  # 在滚动
-            # 鼠标离开视口：浮层隐藏、滚动停止
-            QApplication.sendEvent(self.window.timeline_tree.viewport(),
-                                   QEvent(QEvent.Leave))
-            self.assertFalse(self.window._marquee_box.isVisible())
-            self.assertFalse(self.window._marquee_timer.isActive())
-            self.window.hide()
-        finally:
-            if old_dir is None:
-                os.environ.pop("BANGUMI_CACHE_DIR", None)
-            else:
-                os.environ["BANGUMI_CACHE_DIR"] = old_dir
-            tmp.cleanup()
-
 
 if __name__ == "__main__":
     unittest.main()
