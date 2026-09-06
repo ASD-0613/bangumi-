@@ -353,11 +353,11 @@ class GuiSmokeTest(unittest.TestCase):
         os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
         try:
             w1 = gui.MainWindow()
-            self.assertEqual(w1._theme, "深色")
-            w1.theme_combo.setCurrentText("浅色")  # 触发即时保存
-            self.assertEqual(settings_store.load()["theme"], "浅色")
+            self.assertEqual(w1._theme, "浅色")   # v3.2.0 起默认浅色
+            w1.theme_combo.setCurrentText("深色")  # 触发即时保存
+            self.assertEqual(settings_store.load()["theme"], "深色")
             w2 = gui.MainWindow()
-            self.assertEqual(w2._theme, "浅色")
+            self.assertEqual(w2._theme, "深色")
             w1.close()
             w2.close()
         finally:
@@ -366,6 +366,37 @@ class GuiSmokeTest(unittest.TestCase):
             else:
                 os.environ["BANGUMI_CACHE_DIR"] = old_dir
             tmp.cleanup()
+
+    def test_timeline_marquee_hover(self) -> None:
+        """追番日历：鼠标悬停名称行 → 委托记录悬停行并启动跑马灯动画。"""
+        from PyQt5.QtCore import QEvent, QPoint
+        from PyQt5.QtGui import QMouseEvent
+
+        days = api_module.parse_timeline(CALENDAR_DATA)
+        self.window._timeline_selected = 1
+        self.window._render_timeline_day()
+        self.window.show()
+        self.window.resize(1100, 760)
+        app = QApplication.instance()
+        for _ in range(30):
+            app.processEvents()
+            time.sleep(0.005)
+        row = self.window.timeline_tree.topLevelItem(0)
+        self.assertIsNotNone(row)
+        rect = self.window.timeline_tree.visualItemRect(row)
+        center = (rect.center() if rect.width() > 0 and rect.height() > 0
+                  else QPoint(200, 80))
+        ev = QMouseEvent(QEvent.MouseMove, center, Qt.NoButton,
+                         Qt.NoButton, Qt.NoModifier)
+        QApplication.sendEvent(self.window.timeline_tree.viewport(), ev)
+        self.assertEqual(self.window._name_delegate._hover_row, 0)
+        self.assertTrue(self.window._name_delegate._timer.isActive())
+        # 鼠标离开视口：跑马灯停止
+        leave = QEvent(QEvent.Leave)
+        QApplication.sendEvent(self.window.timeline_tree.viewport(), leave)
+        self.assertIsNone(self.window._name_delegate._hover_row)
+        self.assertFalse(self.window._name_delegate._timer.isActive())
+        self.window.hide()
 
 
 if __name__ == "__main__":

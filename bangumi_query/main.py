@@ -46,10 +46,12 @@ try:  # GUI 依赖检测：缺少时给出清晰的中文提示
         pyqtSignal,
     )
     from PyQt5.QtGui import (
+        QBrush,
         QColor,
         QFont,
         QIcon,
         QImage,
+        QLinearGradient,
         QPalette,
         QPainter,
         QPen,
@@ -104,6 +106,9 @@ from .models.bangumi import (
     StaffItem,
     TimelineDay,
 )
+
+# 主题强调色：星期选中、打钩框选中共用，保证观感一致
+ACCENT_GREEN = "#3fa34d"
 
 # ---------------------------------------------------------------------------
 # 常量与纯文本格式化工具（不依赖 Qt，便于单测）
@@ -488,11 +493,17 @@ class WatchedCheckBox(QPushButton):
         painter.setRenderHint(QPainter.Antialiasing)
         rect = self.rect().adjusted(2, 2, -2, -2)
 
-        # 圆角正方形框：粗黑边；选中时绿底
+        # 圆角正方形框：粗黑边；选中时绿底（ACCENT_GREEN，与星期选中一致，
+        # 叠加轻微纵向渐变提升质感）
         painter.setPen(QPen(QColor("#000000"), 3))
-        painter.setBrush(
-            QColor("#3fa34d") if self.isChecked() else QColor("#ffffff")
-        )
+        if self.isChecked():
+            base = QColor(ACCENT_GREEN)
+            grad = QLinearGradient(0, rect.top(), 0, rect.bottom())
+            grad.setColorAt(0.0, base.lighter(115))
+            grad.setColorAt(1.0, base.darker(115))
+            painter.setBrush(QBrush(grad))
+        else:
+            painter.setBrush(QColor("#ffffff"))
         painter.drawRoundedRect(rect, 9, 9)
 
         # 钩形折线：选中时纯黑且放大 1.18 倍（围绕中心缩放）
@@ -504,7 +515,7 @@ class WatchedCheckBox(QPushButton):
                for x, y in raw]
         check_pen = QPen(
             QColor("#000000" if self.isChecked() else "#c9c9c9"),
-            4 if self.isChecked() else 3.5,
+            4.5 if self.isChecked() else 3.5,
         )
         check_pen.setCapStyle(Qt.RoundCap)
         check_pen.setJoinStyle(Qt.RoundJoin)
@@ -643,7 +654,7 @@ class MainWindow(QMainWindow):
         self._col_widths_user: Set[str] = set()
         self._widths_programmatic: bool = False
         # 当前主题（深色/浅色），与底部下拉框联动并持久化
-        self._theme: str = str(self._saved_settings.get("theme", "深色"))
+        self._theme: str = str(self._saved_settings.get("theme", "浅色"))
         # 排行榜渐进式加载：首屏一个请求，后台逐页补全候选池
         self._rank_pool_raw: List[Dict[str, Any]] = []
         self._rank_pool_next_offset: int = 0
@@ -699,7 +710,7 @@ class MainWindow(QMainWindow):
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(list(THEMES.keys()))
         if self._theme not in THEMES:
-            self._theme = "深色"
+            self._theme = "浅色"
         self.theme_combo.setCurrentText(self._theme)
         self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
         bottom_bar.addWidget(self.theme_combo)
@@ -973,6 +984,9 @@ class MainWindow(QMainWindow):
         # 番剧名称列：悬停且名称超宽时横向滚动显示全名
         self._name_delegate = MarqueeNameDelegate(self.timeline_tree)
         self.timeline_tree.setItemDelegateForColumn(1, self._name_delegate)
+        # 悬停判定需要鼠标追踪：否则视图不派发移动事件，跑马灯无法触发
+        self.timeline_tree.setMouseTracking(True)
+        self.timeline_tree.viewport().setMouseTracking(True)
         self.timeline_tree.itemEntered.connect(
             lambda item, _col: self._name_delegate.set_hover_row(
                 self.timeline_tree.indexOfTopLevelItem(item))
@@ -2156,11 +2170,15 @@ class MainWindow(QMainWindow):
             pass
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
-        """鼠标离开追番日历视口时停止名称跑马灯。"""
-        if (hasattr(self, "timeline_tree")
-                and obj is self.timeline_tree.viewport()
-                and event.type() == QEvent.Leave):
-            self._name_delegate.set_hover_row(None)
+        """追番日历视口：移动=判定悬停行（跑马灯），离开=停止跑马灯。"""
+        if hasattr(self, "timeline_tree") and obj is self.timeline_tree.viewport():
+            if event.type() == QEvent.MouseMove:
+                item = self.timeline_tree.itemAt(event.pos())
+                row = (self.timeline_tree.indexOfTopLevelItem(item)
+                       if item is not None else None)
+                self._name_delegate.set_hover_row(row)
+            elif event.type() == QEvent.Leave:
+                self._name_delegate.set_hover_row(None)
         return super().eventFilter(obj, event)
 
     def resizeEvent(self, event: Any) -> None:
@@ -2225,7 +2243,7 @@ def main() -> int:
     # 各控件的专用字体（表格 12pt、标题 16pt 等）在此基础之上覆盖
     app.setFont(QFont("Microsoft YaHei UI", 10))
     # 全局主题（深色/浅色，记忆于 settings.json）
-    theme = str(settings_store.load().get("theme", "深色"))
+    theme = str(settings_store.load().get("theme", "浅色"))
     app.setStyleSheet(THEMES.get(theme, STYLE_SHEET_DARK))
     icon = _app_icon()
     if icon is not None:
