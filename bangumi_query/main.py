@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import os
 import sys
 import time
@@ -565,6 +566,9 @@ class MarqueeNameDelegate(QStyledItemDelegate):
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem,
               index: QModelIndex) -> None:
+        if not index.isValid():
+            super().paint(painter, option, index)
+            return
         text = index.data(Qt.DisplayRole) or ""
         metrics = option.fontMetrics
         text_w = metrics.horizontalAdvance(text)
@@ -2234,9 +2238,30 @@ def _app_icon() -> Optional[QIcon]:
     return None
 
 
+# 崩溃日志文件句柄（保持引用，避免被关闭）
+_CRASH_LOG_FILE: Any = None
+
+
+def _enable_crash_log() -> None:
+    """把原生崩溃（段错误等）发生时的 Python 调用栈写入 crash.log。
+
+    文件位于 %LOCALAPPDATA%\\BangumiQuery\\crash.log（每次启动重写），
+    用于定位“闪退”类无法用异常捕获的崩溃。
+    """
+    global _CRASH_LOG_FILE
+    try:
+        log_dir = disk_cache.cache_root().parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        _CRASH_LOG_FILE = open(log_dir / "crash.log", "w", encoding="utf-8")
+        faulthandler.enable(file=_CRASH_LOG_FILE, all_threads=True)
+    except Exception:  # noqa: BLE001 - 日志失败不影响运行
+        _CRASH_LOG_FILE = None
+
+
 def main() -> int:
     """GUI 程序入口：初始化网络设置并启动 Qt 事件循环。"""
     api.apply_network_settings()  # 沿用原有代理/超时配置逻辑
+    _enable_crash_log()
     app = QApplication(sys.argv)
     app.setApplicationName(config.APP_NAME)
     # 全局字体用微软雅黑：Windows 默认字体渲染中文发虚，雅黑明显更清晰；
