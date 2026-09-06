@@ -368,34 +368,49 @@ class GuiSmokeTest(unittest.TestCase):
             tmp.cleanup()
 
     def test_timeline_marquee_hover(self) -> None:
-        """追番日历：鼠标悬停名称行 → 委托记录悬停行并启动跑马灯动画。"""
+        """追番日历：悬停超宽名称行 → 跑马灯浮层显示并滚动；离开即隐藏。"""
         from PyQt5.QtCore import QEvent, QPoint
         from PyQt5.QtGui import QMouseEvent
+        from bangumi_query.models.bangumi import TimelineDay, TimelineItem
 
-        days = api_module.parse_timeline(CALENDAR_DATA)
+        long_title = ("无职转生 ～到了异世界就拿出真本事～ 第三季 特别版"
+                      "超长名称测试用例超长名称测试用例")
+        day = TimelineDay(date="", weekday=1, weekday_cn="周一",
+                          is_today=False, items=[
+                              TimelineItem(season_id=1, title=long_title,
+                                           cover="", pub_time="",
+                                           ep_label="", category="动画")])
+        self.window._timeline_days = [day]
         self.window._timeline_selected = 1
         self.window._render_timeline_day()
         self.window.show()
         self.window.resize(1100, 760)
+        self.window.tabs.setCurrentIndex(3)  # 切到追番日历页签（否则视口尺寸为零）
         app = QApplication.instance()
         for _ in range(30):
             app.processEvents()
             time.sleep(0.005)
+        # 收窄名称列，确保名称必然超宽
+        self.window.timeline_tree.header().resizeSection(1, 120)
         row = self.window.timeline_tree.topLevelItem(0)
-        self.assertIsNotNone(row)
         rect = self.window.timeline_tree.visualItemRect(row)
         center = (rect.center() if rect.width() > 0 and rect.height() > 0
                   else QPoint(200, 80))
         ev = QMouseEvent(QEvent.MouseMove, center, Qt.NoButton,
                          Qt.NoButton, Qt.NoModifier)
         QApplication.sendEvent(self.window.timeline_tree.viewport(), ev)
-        self.assertEqual(self.window._name_delegate._hover_row, 0)
-        self.assertTrue(self.window._name_delegate._timer.isActive())
-        # 鼠标离开视口：跑马灯停止
-        leave = QEvent(QEvent.Leave)
-        QApplication.sendEvent(self.window.timeline_tree.viewport(), leave)
-        self.assertIsNone(self.window._name_delegate._hover_row)
-        self.assertFalse(self.window._name_delegate._timer.isActive())
+        self.assertTrue(self.window._marquee_box.isVisible())
+        self.assertTrue(self.window._marquee_timer.isActive())
+        offset1 = self.window._marquee_offset
+        for _ in range(10):
+            app.processEvents()
+            time.sleep(0.02)
+        self.assertGreater(self.window._marquee_offset, offset1)  # 在滚动
+        # 鼠标离开视口：浮层隐藏、滚动停止
+        QApplication.sendEvent(self.window.timeline_tree.viewport(),
+                               QEvent(QEvent.Leave))
+        self.assertFalse(self.window._marquee_box.isVisible())
+        self.assertFalse(self.window._marquee_timer.isActive())
         self.window.hide()
 
 

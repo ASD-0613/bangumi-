@@ -36,16 +36,7 @@ from typing import Any, Awaitable, Callable, List, Optional, Sequence, Set, Tupl
 
 try:  # GUI 依赖检测：缺少时给出清晰的中文提示
     import requests  # noqa: F401 - 用于后台线程下载封面图
-    from PyQt5.QtCore import (
-        QEvent,
-        QModelIndex,
-        QPointF,
-        QSize,
-        QThread,
-        Qt,
-        QTimer,
-        pyqtSignal,
-    )
+    from PyQt5.QtCore import QEvent, QPoint, QSize, QThread, Qt, QTimer, pyqtSignal
     from PyQt5.QtGui import (
         QBrush,
         QColor,
@@ -75,9 +66,6 @@ try:  # GUI 依赖检测：缺少时给出清晰的中文提示
         QMessageBox,
         QPushButton,
         QScrollArea,
-        QStyle,
-        QStyledItemDelegate,
-        QStyleOptionViewItem,
         QTableWidget,
         QTableWidgetItem,
         QTabWidget,
@@ -201,6 +189,7 @@ QPushButton:checked:hover { background: #4bb45c; }
 QLabel[hint="true"] { color: #8fa8bd; }
 QLabel[coverBox="true"] { border: 1px solid #32465c;
     background-color: #141d26; color: #8fa8bd; border-radius: 4px; }
+QWidget[marquee="true"] { background: #17222d; border: 1px solid #32465c; }
 """
 
 # 全局浅色主题：结构与深色一致，配色为浅色变体
@@ -275,6 +264,7 @@ QPushButton:checked:hover { background: #4bb45c; }
 QLabel[hint="true"] { color: #66727d; }
 QLabel[coverBox="true"] { border: 1px solid #c9d4dd;
     background-color: #ffffff; color: #8a97a3; border-radius: 4px; }
+QWidget[marquee="true"] { background: #ffffff; border: 1px solid #c9d4dd; }
 """
 
 # 可选主题（键即界面下拉框里的显示名，存入 settings.json 的 "theme" 键）
@@ -522,79 +512,6 @@ class WatchedCheckBox(QPushButton):
         check_pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(check_pen)
         painter.drawPolyline(QPolygonF(pts))
-
-
-class MarqueeNameDelegate(QStyledItemDelegate):
-    """追番日历“番剧名称”列代理：悬停且文本超宽时横向循环滚动显示全名。
-
-    非悬停或文本可完整显示时按默认方式绘制；悬停超宽时自绘背景并以
-    跑马灯方式滚动文本（两份文本 + 间隔循环拼接，视觉无缝）。
-    """
-
-    _GAP = 32          # 滚动文本两份之间的间隔（px）
-    _SPEED = 2         # 每次心跳前进的像素
-    _INTERVAL_MS = 40  # 心跳间隔
-
-    def __init__(self, parent: Any) -> None:
-        super().__init__(parent)
-        self._hover_row: Optional[int] = None
-        self._offset: int = 0
-        self._timer = QTimer(self)
-        self._timer.setInterval(self._INTERVAL_MS)
-        self._timer.timeout.connect(self._tick)
-
-    def set_hover_row(self, row: Optional[int]) -> None:
-        """设置当前悬停的行；None 表示鼠标已离开列表。"""
-        if row != self._hover_row:
-            self._hover_row = row
-            self._offset = 0
-            if row is None:
-                self._timer.stop()
-            else:
-                self._timer.start()
-        self.parent().viewport().update()
-
-    def reset(self) -> None:
-        """列表重建后清除悬停状态。"""
-        self._hover_row = None
-        self._offset = 0
-        self._timer.stop()
-
-    def _tick(self) -> None:
-        self._offset += self._SPEED
-        self.parent().viewport().update()
-
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem,
-              index: QModelIndex) -> None:
-        if not index.isValid():
-            super().paint(painter, option, index)
-            return
-        text = index.data(Qt.DisplayRole) or ""
-        metrics = option.fontMetrics
-        text_w = metrics.horizontalAdvance(text)
-        avail = option.rect.width() - 12
-        if not text or self._hover_row != index.row() or text_w <= avail:
-            super().paint(painter, option, index)
-            return
-        # 悬停且超宽：自绘背景 + 循环滚动文本
-        painter.save()
-        painter.setClipRect(option.rect)
-        if option.state & QStyle.State_Selected:
-            background = option.palette.color(QPalette.Highlight)
-            foreground = option.palette.color(QPalette.HighlightedText)
-        else:
-            background = option.palette.color(QPalette.Base)
-            foreground = option.palette.color(QPalette.Text)
-        painter.fillRect(option.rect, background)
-        painter.setPen(foreground)
-        loop = text_w + self._GAP
-        x = option.rect.left() + 6 - (self._offset % loop)
-        y = (option.rect.top()
-             + (option.rect.height() - metrics.height()) // 2
-             + metrics.ascent())
-        painter.drawText(QPoint(int(x), int(y)), text)
-        painter.drawText(QPoint(int(x + loop), int(y)), text)
-        painter.restore()
 
 
 # ---------------------------------------------------------------------------
@@ -985,17 +902,29 @@ class MainWindow(QMainWindow):
         self.timeline_tree.header().sectionResized.connect(
             lambda i, o, n: self._on_section_resized("timeline", i, o, n)
         )
-        # 番剧名称列：悬停且名称超宽时横向滚动显示全名
-        self._name_delegate = MarqueeNameDelegate(self.timeline_tree)
-        self.timeline_tree.setItemDelegateForColumn(1, self._name_delegate)
+        # 番剧名称列：悬停且名称超宽时显示跑马灯浮层（滚动展示全名）。
+        # 注意：不使用自定义绘制委托——真实环境下委托绘制路径曾触发
+        # Qt 内部 qFatal 闪退；浮层是标准控件，无此风险。
+        self._marquee_box = QWidget(self.timeline_tree.viewport())
+        self._marquee_box.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._marquee_box.setProperty("marquee", True)
+        self._marquee_label = QLabel(self._marquee_box)
+        self._marquee_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._marquee_box.hide()
+        self._marquee_title = ""
+        self._marquee_offset = 0
+        self._marquee_timer = QTimer(self)
+        self._marquee_timer.setInterval(40)
+        self._marquee_timer.timeout.connect(self._marquee_tick)
         # 悬停判定需要鼠标追踪：否则视图不派发移动事件，跑马灯无法触发
         self.timeline_tree.setMouseTracking(True)
         self.timeline_tree.viewport().setMouseTracking(True)
-        self.timeline_tree.itemEntered.connect(
-            lambda item, _col: self._name_delegate.set_hover_row(
-                self.timeline_tree.indexOfTopLevelItem(item))
-        )
         self.timeline_tree.viewport().installEventFilter(self)
+        # 滚动内容时行位置变化，直接隐藏浮层（下次悬停再显示）
+        self.timeline_tree.verticalScrollBar().valueChanged.connect(
+            lambda _v: self._hide_marquee())
+        self.timeline_tree.horizontalScrollBar().valueChanged.connect(
+            lambda _v: self._hide_marquee())
         layout.addWidget(self.timeline_tree, stretch=1)
 
         # 默认高亮“今天”，列宽在首次渲染与窗口缩放时自适应
@@ -1895,7 +1824,7 @@ class MainWindow(QMainWindow):
     def _render_timeline_day(self) -> None:
         """渲染当前选中星期的条目：无折叠分组，直接平铺为数据行。"""
         self.timeline_tree.clear()
-        self._name_delegate.reset()  # 列表重建，清除跑马灯悬停状态
+        self._hide_marquee()  # 列表重建，隐藏跑马灯浮层
         self._apply_timeline_widths()
         day = self._selected_timeline_day()
         if day is None:
@@ -2174,16 +2103,62 @@ class MainWindow(QMainWindow):
             pass
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
-        """追番日历视口：移动=判定悬停行（跑马灯），离开=停止跑马灯。"""
+        """追番日历视口：移动=更新悬停跑马灯浮层，离开=隐藏浮层。"""
         if hasattr(self, "timeline_tree") and obj is self.timeline_tree.viewport():
             if event.type() == QEvent.MouseMove:
-                item = self.timeline_tree.itemAt(event.pos())
-                row = (self.timeline_tree.indexOfTopLevelItem(item)
-                       if item is not None else None)
-                self._name_delegate.set_hover_row(row)
+                self._update_marquee(self.timeline_tree.itemAt(event.pos()))
             elif event.type() == QEvent.Leave:
-                self._name_delegate.set_hover_row(None)
+                self._hide_marquee()
         return super().eventFilter(obj, event)
+
+    def _update_marquee(self, item: Optional[QTreeWidgetItem]) -> None:
+        """悬停行：名称超宽时在名称单元格上方显示滚动浮层。"""
+        if item is None:
+            self._hide_marquee()
+            return
+        row_rect = self.timeline_tree.visualItemRect(item)
+        pos_ok = row_rect.height() > 0 and row_rect.width() > 0
+        if not pos_ok:
+            self._hide_marquee()
+            return
+        title = item.text(1) or ""
+        header = self.timeline_tree.header()
+        cell_w = header.sectionSize(1) - 10
+        text_w = self.timeline_tree.fontMetrics().horizontalAdvance(title)
+        if not title or text_w <= cell_w:
+            self._hide_marquee()  # 名称能完整显示，无需跑马灯
+            return
+        x = header.sectionViewportPosition(1) + 5
+        y = row_rect.top() + 2
+        w = header.sectionSize(1) - 10
+        h = row_rect.height() - 4
+        self._marquee_box.setGeometry(x, y, w, h)
+        if self._marquee_title != title:
+            self._marquee_title = title
+            self._marquee_offset = 0
+            self._marquee_label.setText(f"{title}　　{title}")
+            self._marquee_label.adjustSize()
+            self._marquee_label.move(
+                0, max(0, (h - self._marquee_label.height()) // 2))
+        self._marquee_box.show()
+        self._marquee_label.show()
+        if not self._marquee_timer.isActive():
+            self._marquee_timer.start()
+
+    def _marquee_tick(self) -> None:
+        """跑马灯心跳：文字整体左移，滚出后从右侧重新进入（无缝循环）。"""
+        if not self._marquee_title:
+            self._marquee_timer.stop()
+            return
+        label_w = self._marquee_label.width()
+        loop = label_w + 24
+        self._marquee_offset = (self._marquee_offset + 2) % loop
+        self._marquee_label.move(-self._marquee_offset, self._marquee_label.y())
+
+    def _hide_marquee(self) -> None:
+        """隐藏跑马灯浮层并停止滚动。"""
+        self._marquee_box.hide()
+        self._marquee_timer.stop()
 
     def resizeEvent(self, event: Any) -> None:
         """窗口缩放时同步调整追番日历列宽（番剧名称列≈一半）。"""
@@ -2240,20 +2215,39 @@ def _app_icon() -> Optional[QIcon]:
 
 # 崩溃日志文件句柄（保持引用，避免被关闭）
 _CRASH_LOG_FILE: Any = None
+# Qt 日志文件句柄（qFatal 的消息文本是定位闪退的关键）
+_QT_LOG_FILE: Any = None
+
+
+def _qt_message_handler(mode: Any, _context: Any, message: str) -> None:
+    """捕获 Qt 的警告/致命消息写入 qt.log（qFatal 文本是闪退定位关键）。"""
+    names = {0: "debug", 1: "warning", 2: "critical", 3: "FATAL", 4: "info"}
+    try:
+        if _QT_LOG_FILE is not None and mode >= 1:  # 跳过 debug 级
+            from datetime import datetime
+            stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            _QT_LOG_FILE.write(
+                f"[qt-{names.get(mode, mode)} {stamp}] {message}\n"
+            )
+            _QT_LOG_FILE.flush()
+    except Exception:  # noqa: BLE001 - 日志失败不影响运行
+        pass
 
 
 def _enable_crash_log() -> None:
     """把原生崩溃（段错误等）发生时的 Python 调用栈写入 crash.log。
 
-    文件位于 %LOCALAPPDATA%\\BangumiQuery\\crash.log（每次启动重写），
-    用于定位“闪退”类无法用异常捕获的崩溃。
+    同时打开 qt.log 供 Qt 消息处理器写入 qFatal/qWarning 文本
+    （qFatal 的消息文本是定位“闪退”的关键）。
+    文件位于 %LOCALAPPDATA%\\BangumiQuery\\（每次启动重写）。
     """
-    global _CRASH_LOG_FILE
+    global _CRASH_LOG_FILE, _QT_LOG_FILE
     try:
         log_dir = disk_cache.cache_root().parent
         log_dir.mkdir(parents=True, exist_ok=True)
         _CRASH_LOG_FILE = open(log_dir / "crash.log", "w", encoding="utf-8")
         faulthandler.enable(file=_CRASH_LOG_FILE, all_threads=True)
+        _QT_LOG_FILE = open(log_dir / "qt.log", "w", encoding="utf-8")
     except Exception:  # noqa: BLE001 - 日志失败不影响运行
         _CRASH_LOG_FILE = None
 
@@ -2262,6 +2256,8 @@ def main() -> int:
     """GUI 程序入口：初始化网络设置并启动 Qt 事件循环。"""
     api.apply_network_settings()  # 沿用原有代理/超时配置逻辑
     _enable_crash_log()
+    from PyQt5.QtCore import qInstallMessageHandler
+    qInstallMessageHandler(_qt_message_handler)
     app = QApplication(sys.argv)
     app.setApplicationName(config.APP_NAME)
     # 全局字体用微软雅黑：Windows 默认字体渲染中文发虚，雅黑明显更清晰；
