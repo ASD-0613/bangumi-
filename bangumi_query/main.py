@@ -1025,6 +1025,7 @@ class MainWindow(QMainWindow):
         self._lib_watching_btn.setChecked(True)
 
         self.tabs.addTab(page, "正在看 / 已看完")
+        self._refresh_empty_page()
 
     # ------------------------------------------------------------------
     # 通用小工具
@@ -2165,17 +2166,19 @@ class MainWindow(QMainWindow):
         return page
 
     def _refresh_empty_page(self) -> None:
-        """空状态页：按当前主题刷新插画与卡片样式。"""
-        path = _resource_path("empty_library.png")
+        """空状态页：按当前主题加载对应插画。
+
+        浅色主题用原图（底色与页面几乎一致，无框感）；
+        深色主题用透明抠图（人物/沙发/电视浮于深色页面）。
+        """
+        name = ("empty_library_dark.png" if self._theme == "深色"
+                else "empty_library_light.png")
+        path = _resource_path(name)
         pixmap = QPixmap(str(path)) if path.is_file() else QPixmap()
         if not pixmap.isNull():
             self._empty_image.setPixmap(
                 pixmap.scaledToWidth(460, Qt.SmoothTransformation))
-        # 深浅主题均为白色圆角卡片承载浅色插画，深色下自然醒目
-        self._empty_image.setStyleSheet(
-            "background: #ffffff; border: 1px solid "
-            f"{'#c9d4dd' if self._theme == '浅色' else '#32465c'};"
-            " border-radius: 8px;")
+        self._empty_image.setStyleSheet("background: transparent;")
 
     def _sync_library_stack(self) -> None:
         """按当前子页与数据是否为空，切换网格 / 空状态页。"""
