@@ -2156,12 +2156,8 @@ class MainWindow(QMainWindow):
         layout.setAlignment(Qt.AlignCenter)
         self._empty_image = QLabel()
         self._empty_image.setAlignment(Qt.AlignCenter)
-        self._empty_text = QLabel("")
-        self._empty_text.setProperty("hint", True)
-        self._empty_text.setAlignment(Qt.AlignCenter)
         layout.addStretch(1)
         layout.addWidget(self._empty_image)
-        layout.addWidget(self._empty_text)
         layout.addStretch(1)
         return page
 
@@ -2205,8 +2201,6 @@ class MainWindow(QMainWindow):
                 "暂无「已看完」——在番剧详情页顶部选择「已看完」即可加入"
                 if not watched else
                 f"已看完 {len(watched)} 部 · 单击选中，双击查看详情")
-        if (self.library_stack.currentIndex() >= 2):
-            self._empty_text.setText(self.library_hint.text())
         self.statusBar().showMessage(
             f"正在看 {len(watching)} 部 · 已看完 {len(watched)} 部")
         self._ensure_watched_covers(self.watching_grid, watching)
