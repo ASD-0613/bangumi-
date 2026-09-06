@@ -70,7 +70,11 @@ def _build_zip(top: str, exe: Path) -> Path:
             if "__pycache__" not in p.parts:
                 entries.append((p, f"{top}/{p.as_posix()}"))
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        seen = set()
         for src, arc in entries:
+            if arc in seen:
+                continue  # 去重：避免同名条目写入两次
+            seen.add(arc)
             zf.write(src, arc)
     with zipfile.ZipFile(out) as zf:
         if zf.testzip() is not None:
