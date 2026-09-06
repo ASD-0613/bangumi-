@@ -188,6 +188,9 @@ QLabel[coverBox="true"] { border: 1px solid #32465c;
     background-color: #141d26; color: #8fa8bd; border-radius: 4px; }
 QWidget[marquee="true"] { background: #17222d; border: 1px solid #32465c; }
 
+QScrollArea#detailScroll QScrollBar:vertical { width: 18px; }
+QScrollArea#detailScroll QScrollBar::handle:vertical { min-height: 40px; }
+
 QFrame#statePill { border: 2px solid #cfd8e3; border-radius: 14px;
     background: transparent; }
 QFrame#statePill QPushButton { border: none; background: transparent;
@@ -272,6 +275,9 @@ QLabel[hint="true"] { color: #66727d; }
 QLabel[coverBox="true"] { border: 1px solid #c9d4dd;
     background-color: #ffffff; color: #8a97a3; border-radius: 4px; }
 QWidget[marquee="true"] { background: #ffffff; border: 1px solid #c9d4dd; }
+
+QScrollArea#detailScroll QScrollBar:vertical { width: 18px; }
+QScrollArea#detailScroll QScrollBar::handle:vertical { min-height: 40px; }
 
 QFrame#statePill { border: 2px solid #2a3a48; border-radius: 14px;
     background: transparent; }
@@ -523,7 +529,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"{config.APP_NAME} v{config.VERSION}")
-        self.resize(1080, 760)
+        self.resize(1220, 760)  # 默认宽度保证“正在看/已看完”5 卡一行
         self.setMinimumSize(880, 600)
 
         # ---- 状态 ----
@@ -692,6 +698,7 @@ class MainWindow(QMainWindow):
 
     def _build_detail_tab(self) -> None:
         scroll = QScrollArea()
+        scroll.setObjectName("detailScroll")  # 详情页主滚动条定向加宽
         scroll.setWidgetResizable(True)
         content = QWidget()
         outer = QVBoxLayout(content)
