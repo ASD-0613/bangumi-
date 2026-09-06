@@ -295,6 +295,8 @@ class GuiSmokeTest(unittest.TestCase):
             self.assertFalse(self.window._pill_watching_btn.isChecked())
             self.assertFalse(self.window._pill_watched_btn.isChecked())
             self.assertTrue(self.window._detail_pill.isEnabled())
+            self.assertTrue(self.window._pill_watching_btn.isEnabled())
+            self.assertTrue(self.window._pill_watched_btn.isEnabled())
             # 标记“正在看”：入库 + 详情选择器状态
             self.window._set_detail_state("watching")
             self.assertEqual(watched_store.state_of(33346), "watching")

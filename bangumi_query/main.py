@@ -710,6 +710,7 @@ class MainWindow(QMainWindow):
         for btn in (self._pill_watching_btn, self._pill_watched_btn):
             btn.setEnabled(False)
             btn.clicked.connect(self._on_state_clicked)
+        self._detail_pill.setEnabled(False)
         title_row.addWidget(self._detail_pill, 0, Qt.AlignTop)
         outer.addLayout(title_row)
 
@@ -1321,6 +1322,7 @@ class MainWindow(QMainWindow):
             btn.blockSignals(True)
             btn.setChecked(False)
             btn.blockSignals(False)
+            btn.setEnabled(False)
         self._detail_pill.setEnabled(False)
         self.tabs.setCurrentIndex(1)
         self._busy(f"正在获取番剧详情（season_id={season_id}）…")
@@ -1410,9 +1412,9 @@ class MainWindow(QMainWindow):
             if state:
                 (self._pill_watching_btn if state == "watching"
                  else self._pill_watched_btn).setChecked(True)
-            self._detail_pill.setEnabled(True)
+            self._set_pill_enabled(True)
         else:
-            self._detail_pill.setEnabled(False)
+            self._set_pill_enabled(False)
 
         rows = detail_info_rows(detail)
         self.detail_info_table.setRowCount(0)
@@ -2114,6 +2116,15 @@ class MainWindow(QMainWindow):
                 item.setIcon(QIcon(self._placeholder_pixmap()))
             grid.addItem(item)
         self._ensure_watched_covers(grid, items)
+
+    def _set_pill_enabled(self, enabled: bool) -> None:
+        """启用/禁用双段选择器：按钮与容器必须一起控制——
+
+        子控件被单独 setEnabled(False) 后，仅恢复父容器不会连带恢复。
+        """
+        for btn in (self._pill_watching_btn, self._pill_watched_btn):
+            btn.setEnabled(enabled)
+        self._detail_pill.setEnabled(enabled)
 
     def _score_colors(self) -> Tuple[str, str]:
         """评分档位配色（金/绿），随主题切换。"""
