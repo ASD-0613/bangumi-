@@ -36,12 +36,14 @@ from typing import Any, Awaitable, Callable, List, Optional, Sequence, Set, Tupl
 
 try:  # GUI 依赖检测：缺少时给出清晰的中文提示
     import requests  # noqa: F401 - 用于后台线程下载封面图
-    from PyQt5.QtCore import QEvent, QPoint, QSize, QThread, Qt, QTimer, pyqtSignal
+    from PyQt5.QtCore import (QByteArray, QEvent, QPointF, QSize,
+                              QThread, Qt, QTimer, pyqtSignal)
     from PyQt5.QtGui import (
         QColor,
         QFont,
         QIcon,
         QImage,
+        QPalette,
         QPen,
         QPixmap,
     )
@@ -186,7 +188,6 @@ QPushButton:checked:hover { background: #4bb45c; }
 QLabel[hint="true"] { color: #8fa8bd; }
 QLabel[coverBox="true"] { border: 1px solid #32465c;
     background-color: #141d26; color: #8fa8bd; border-radius: 4px; }
-QWidget[marquee="true"] { background: #17222d; border: 1px solid #32465c; }
 
 QScrollArea#detailScroll QScrollBar:vertical { width: 18px; }
 QScrollArea#detailScroll QScrollBar::handle:vertical { min-height: 40px; }
@@ -274,7 +275,6 @@ QPushButton:checked:hover { background: #4bb45c; }
 QLabel[hint="true"] { color: #66727d; }
 QLabel[coverBox="true"] { border: 1px solid #c9d4dd;
     background-color: #ffffff; color: #8a97a3; border-radius: 4px; }
-QWidget[marquee="true"] { background: #ffffff; border: 1px solid #c9d4dd; }
 
 QScrollArea#detailScroll QScrollBar:vertical { width: 18px; }
 QScrollArea#detailScroll QScrollBar::handle:vertical { min-height: 40px; }
@@ -488,6 +488,24 @@ class CoverWorker(QThread):
         self.image_ready.emit(self._url, data)
 
 
+class FixedWheelTextBrowser(QTextBrowser):
+    """滚轮仅在本区域内滚动；到达上下边界不再带动整页（阻断滚动链）。
+
+    光标放在简介/声优框内时只滚框内内容；想翻整页请使用空白区域
+    或右侧全局滚动条。
+    """
+
+    def wheelEvent(self, event: Any) -> None:  # noqa: N802 - Qt 命名约定
+        bar = self.verticalScrollBar()
+        dy = event.angleDelta().y()
+        at_top = dy > 0 and bar.value() <= 0
+        at_bottom = dy < 0 and bar.value() >= bar.maximum()
+        if at_top or at_bottom:
+            event.accept()  # 吞掉边界滚轮，不向父级滚动区传播
+            return
+        super().wheelEvent(event)
+
+
 def make_state_pill(large: bool = False):
     """构造“正在看 | 已看完”双段选择器（互斥、可再次点击取消）。
 
@@ -585,6 +603,12 @@ class MainWindow(QMainWindow):
         self._rank_request_sort: str = "热度"
 
         self._build_ui()
+        # 恢复上次窗口大小/位置（Qt 原生 restoreGeometry，含最大化与
+        # 多显示器越界保护）；saveGeometry 在 closeEvent 落盘
+        saved_geo = str(self._saved_settings.get("win_geometry", ""))
+        if saved_geo:
+            self.restoreGeometry(
+                QByteArray.fromBase64(saved_geo.encode("ascii")))
 
     # ------------------------------------------------------------------
     # UI 构建
@@ -751,14 +775,14 @@ class MainWindow(QMainWindow):
 
         # 简介
         outer.addWidget(self._section_label("剧情简介"))
-        self.detail_intro = QTextBrowser()
+        self.detail_intro = FixedWheelTextBrowser()
         self.detail_intro.setFixedHeight(150)
         self.detail_intro.setPlainText("")
         outer.addWidget(self.detail_intro)
 
         # 声优 / 制作团队
         outer.addWidget(self._section_label("主要声优 / 制作团队"))
-        self.detail_staff = QTextBrowser()
+        self.detail_staff = FixedWheelTextBrowser()
         self.detail_staff.setFixedHeight(200)
         self.detail_staff.setPlainText("")
         outer.addWidget(self.detail_staff)
@@ -909,10 +933,11 @@ class MainWindow(QMainWindow):
         # Qt 内部 qFatal 闪退；浮层是标准控件，无此风险。
         self._marquee_box = QWidget(self.timeline_tree.viewport())
         self._marquee_box.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self._marquee_box.setProperty("marquee", True)
+        # 纯裁剪容器：无背景无边框（视觉上没有“框”），
+        # 只负责把滚动文字裁剪在名称单元格内
         self._marquee_label = QLabel(self._marquee_box)
         self._marquee_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self._marquee_box.hide()
+        self._marquee_label.hide()
         self._marquee_title = ""
         self._marquee_offset = 0
         self._marquee_timer = QTimer(self)
@@ -2273,6 +2298,20 @@ class MainWindow(QMainWindow):
         if self._marquee_title != title:
             self._marquee_title = title
             self._marquee_offset = 0
+            # 无框纯文字：底色与所在行完全一致（隔行底色/选中色自适应），
+            # 视觉上只有文字在滚动
+            if item.isSelected():
+                bg = self.timeline_tree.palette().color(QPalette.Highlight)
+                fg = self.timeline_tree.palette().color(
+                    QPalette.HighlightedText)
+            else:
+                key = (QPalette.Base
+                       if self.timeline_tree.indexOfTopLevelItem(item) % 2 == 0
+                       else QPalette.AlternateBase)
+                bg = self.timeline_tree.palette().color(key)
+                fg = self.timeline_tree.palette().color(QPalette.Text)
+            self._marquee_label.setStyleSheet(
+                f"background-color: {bg.name()}; color: {fg.name()};")
             self._marquee_label.setText(f"{title}　　{title}")
             self._marquee_label.adjustSize()
             self._marquee_label.move(
@@ -2316,6 +2355,11 @@ class MainWindow(QMainWindow):
         因此此时直接 os._exit 立即结束进程，保证退出永远干脆利落。
         """
         self.hide()  # 立即从屏幕消失，收尾过程对用户不可见
+        try:  # 窗口大小/位置记忆落盘
+            settings_store.update(win_geometry=bytes(
+                self.saveGeometry().toBase64()).decode("ascii"))
+        except Exception:  # noqa: BLE001
+            pass
         self._persist_column_widths()  # 列宽记忆落盘（业务数据均为即时保存）
         deadline = time.monotonic() + 2.0
         for worker in list(self._workers):

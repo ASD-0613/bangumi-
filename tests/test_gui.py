@@ -379,7 +379,12 @@ class GuiSmokeTest(unittest.TestCase):
             tmp.cleanup()
 
     def test_timeline_marquee_hover(self) -> None:
-        """追番日历：悬停超宽名称行 → 跑马灯浮层显示并滚动；离开即隐藏。"""
+        """追番日历：悬停超宽名称行 → 跑马灯浮层显示并滚动；离开即隐藏。
+
+        环境隔离：本测试关闭窗口会触发列宽持久化，不能污染真实设置；
+        名称本身使用超长标题，默认列宽下必然溢出（不缩列宽）。
+        """
+        import tempfile
         from PyQt5.QtCore import QEvent, QPoint
         from PyQt5.QtGui import QMouseEvent
         from bangumi_query.models.bangumi import TimelineDay, TimelineItem
@@ -391,38 +396,47 @@ class GuiSmokeTest(unittest.TestCase):
                               TimelineItem(season_id=1, title=long_title,
                                            cover="", pub_time="",
                                            ep_label="", category="动画")])
-        self.window._timeline_days = [day]
-        self.window._timeline_selected = 1
-        self.window._render_timeline_day()
-        self.window.show()
-        self.window.resize(1100, 760)
-        self.window.tabs.setCurrentIndex(3)  # 切到追番日历页签（否则视口尺寸为零）
-        app = QApplication.instance()
-        for _ in range(30):
-            app.processEvents()
-            time.sleep(0.005)
-        # 收窄名称列，确保名称必然超宽
-        self.window.timeline_tree.header().resizeSection(1, 120)
-        row = self.window.timeline_tree.topLevelItem(0)
-        rect = self.window.timeline_tree.visualItemRect(row)
-        center = (rect.center() if rect.width() > 0 and rect.height() > 0
-                  else QPoint(200, 80))
-        ev = QMouseEvent(QEvent.MouseMove, center, Qt.NoButton,
-                         Qt.NoButton, Qt.NoModifier)
-        QApplication.sendEvent(self.window.timeline_tree.viewport(), ev)
-        self.assertTrue(self.window._marquee_box.isVisible())
-        self.assertTrue(self.window._marquee_timer.isActive())
-        offset1 = self.window._marquee_offset
-        for _ in range(10):
-            app.processEvents()
-            time.sleep(0.02)
-        self.assertGreater(self.window._marquee_offset, offset1)  # 在滚动
-        # 鼠标离开视口：浮层隐藏、滚动停止
-        QApplication.sendEvent(self.window.timeline_tree.viewport(),
-                               QEvent(QEvent.Leave))
-        self.assertFalse(self.window._marquee_box.isVisible())
-        self.assertFalse(self.window._marquee_timer.isActive())
-        self.window.hide()
+        old_dir = os.environ.get("BANGUMI_CACHE_DIR")
+        tmp = tempfile.TemporaryDirectory()
+        os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
+        try:
+            self.window._timeline_days = [day]
+            self.window._timeline_selected = 1
+            self.window._render_timeline_day()
+            self.window.show()
+            self.window.resize(1100, 760)
+            self.window.tabs.setCurrentIndex(3)  # 切到日历页签（否则视口为零）
+            app = QApplication.instance()
+            for _ in range(30):
+                app.processEvents()
+                time.sleep(0.005)
+            # 名称超长，默认列宽下必然溢出
+            row = self.window.timeline_tree.topLevelItem(0)
+            rect = self.window.timeline_tree.visualItemRect(row)
+            center = (rect.center() if rect.width() > 0 and rect.height() > 0
+                      else QPoint(200, 80))
+            ev = QMouseEvent(QEvent.MouseMove, center, Qt.NoButton,
+                             Qt.NoButton, Qt.NoModifier)
+            QApplication.sendEvent(self.window.timeline_tree.viewport(), ev)
+            self.assertTrue(self.window._marquee_box.isVisible())
+            self.assertTrue(self.window._marquee_timer.isActive())
+            offset1 = self.window._marquee_offset
+            for _ in range(10):
+                app.processEvents()
+                time.sleep(0.02)
+            self.assertGreater(self.window._marquee_offset, offset1)  # 在滚动
+            # 鼠标离开视口：浮层隐藏、滚动停止
+            QApplication.sendEvent(self.window.timeline_tree.viewport(),
+                                   QEvent(QEvent.Leave))
+            self.assertFalse(self.window._marquee_box.isVisible())
+            self.assertFalse(self.window._marquee_timer.isActive())
+            self.window.hide()
+        finally:
+            if old_dir is None:
+                os.environ.pop("BANGUMI_CACHE_DIR", None)
+            else:
+                os.environ["BANGUMI_CACHE_DIR"] = old_dir
+            tmp.cleanup()
 
 
 if __name__ == "__main__":
