@@ -319,6 +319,49 @@ class TestRanking(unittest.TestCase):
             with self.assertRaises(api_module.BangumiQueryError):
                 run(api_module.fetch_ranking(config.RANK_CATEGORIES[0]))
 
+    def test_fetch_rank_pool_page(self) -> None:
+        """渐进式加载：按 offset 取一页原始候选条目。"""
+        captured: dict = {}
+        page_items = [{"id": 1, "type": 2, "name_cn": "甲"}]
+
+        def fake_get(url, params=None):
+            captured["url"] = url
+            captured["params"] = params
+            return {"total": 50, "data": page_items}
+
+        with patch.object(api_module, "_get_json", side_effect=fake_get):
+            page = run(api_module.fetch_rank_pool_page(
+                config.RANK_CATEGORIES[0], offset=25, page_size=10))
+        self.assertEqual(len(page), 1)
+        self.assertTrue(captured["url"].endswith("/subjects"))
+        self.assertEqual(captured["params"]["limit"], 10)
+        self.assertEqual(captured["params"]["offset"], 25)
+        self.assertEqual(captured["params"]["sort"], "rank")
+
+    def test_build_ranking_from_pool_progressive(self) -> None:
+        """候选池渐进补全：不完整的池子也能构建，补全后重排正确。"""
+        cat = config.RANK_CATEGORIES[0]
+        part1 = [{"id": 1, "type": 2, "name_cn": "低",
+                  "rating": {"score": 7.0, "total": 10}}]
+        items = api_module.build_ranking_from_pool(part1, cat, "热度")
+        self.assertEqual([i.title for i in items], ["低"])
+        self.assertEqual(items[0].rank, 1)
+
+        part2 = part1 + [{"id": 2, "type": 2, "name_cn": "高",
+                          "rating": {"score": 7.0, "total": 99}}]
+        items = api_module.build_ranking_from_pool(part2, cat, "热度")
+        self.assertEqual([i.title for i in items], ["高", "低"])
+        self.assertEqual([i.rank for i in items], [1, 2])
+
+    def test_build_ranking_from_pool_region_message(self) -> None:
+        """与整池版本一致的错误提示。"""
+        guochuang = next(
+            cat for cat in config.RANK_CATEGORIES if cat.get("short") == "国漫"
+        )
+        with self.assertRaises(api_module.BangumiQueryError) as ctx:
+            api_module.build_ranking_from_pool([], guochuang, "热度")
+        self.assertIn("暂无该地区条目", str(ctx.exception))
+
 
 class TestTimeline(unittest.TestCase):
     """追番日历（/v0/calendar）解析测试。"""

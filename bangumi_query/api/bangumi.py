@@ -786,14 +786,14 @@ def _region_kept(raw: List[Dict[str, Any]],
 async def fetch_ranking(
     category: Dict[str, Any], sort_key: str = "热度"
 ) -> List[RankItem]:
-    """获取某类别（config.RANK_CATEGORIES 中的一项）的排行榜。
+    """（整池版本，供测试与兼容）一次性拉取候选池并构建榜单。
 
-    流程：GET /v0/subjects 拉取候选池（默认 150 条）-> 日漫/国漫按地区
-    标签过滤 -> 按所选的排序维度（热度/评分/收藏数）降序 -> 取前 50。
+    界面实际采用渐进式加载：``fetch_rank_pool_page`` 首屏取一页，
+    后台逐页补全候选池后经 ``build_ranking_from_pool`` 构建。
 
     Args:
         category: config.RANK_CATEGORIES 中的一项。
-        sort_key: 排序维度，取 config.RANK_SORT_KEYS 之一（默认“热度”）。
+        sort_key: 排序维度，取 config.RANK_SORT_KEYS 之一（默认"热度"）。
 
     Returns:
         带名次（1..N，N<=config.RANK_LIMIT=50）的 RankItem 列表。
@@ -803,7 +803,68 @@ async def fetch_ranking(
     """
     if sort_key not in _RANK_SORT_KIND:
         sort_key = "热度"
-    raw = _region_kept(_rank_pool(category), category)
+    return build_ranking_from_pool(_rank_pool(category), category, sort_key)
+
+
+async def fetch_rank_pool_page(
+    category: Dict[str, Any], offset: int = 0, page_size: int = 25
+) -> List[Dict[str, Any]]:
+    """拉取榜单候选池的一页原始条目（GET /v0/subjects, sort=rank）。
+
+    供界面渐进式加载：首屏只发一个请求取一页，用户翻页/后台补全时
+    再取后续页，避免进入程序时 6 个请求串行导致的长时间等待。
+    （与 api 层其他入口一致声明为协程，供 ApiWorker 经 asyncio.run 调度。）
+
+    Args:
+        category: config.RANK_CATEGORIES 中的一项。
+        offset: 起始偏移（0 起）。
+        page_size: 服务器页大小（非界面每页条数）。
+
+    Returns:
+        原始 Subject 字典列表；无数据或格式异常时为空列表。
+    """
+    type_no = _rank_type_no(category)
+    data = _get_json(
+        f"{BANGUMI_API_BASE}/subjects",
+        params={
+            "type": type_no,
+            "sort": "rank",
+            "limit": max(1, int(page_size)),
+            "offset": max(0, int(offset)),
+        },
+    )
+    if not isinstance(data, dict):
+        return []
+    items = data.get("data")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def build_ranking_from_pool(
+    raw_pool: List[Dict[str, Any]],
+    category: Dict[str, Any],
+    sort_key: str = "热度",
+) -> List[RankItem]:
+    """把候选池原始条目构建为榜单（地区过滤 → 维度降序 → 前 50）。
+
+    与 ``fetch_ranking`` 的构建逻辑完全一致，区别仅在池子由调用方
+    提供（界面渐进式补全，可基于不完整的池子先出结果）。
+
+    Args:
+        raw_pool: 原始 Subject 字典列表（可不完整）。
+        category: config.RANK_CATEGORIES 中的一项。
+        sort_key: 排序维度。
+
+    Returns:
+        带名次的 RankItem 列表。
+
+    Raises:
+        BangumiQueryError: 池子为空或地区过滤后无匹配条目时。
+    """
+    if sort_key not in _RANK_SORT_KIND:
+        sort_key = "热度"
+    raw = _region_kept(list(raw_pool), category)
     if not raw:
         short = str(category.get("short", ""))
         if _region_target(category) is not None:

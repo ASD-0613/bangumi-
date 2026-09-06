@@ -144,7 +144,7 @@ class GuiSmokeTest(unittest.TestCase):
         self.assertEqual(table.item(0, 0).text(), "")   # 封面列
         self.assertEqual(table.item(0, 1).text(), "1")  # 排名
         self.assertEqual(table.item(0, 2).text(), "榜首作品")
-        self.assertEqual(self.window.tabs.currentIndex(), 2)
+        # 数据到达不再强行切换页签（v3.1.0 修复页签自动跳转）
         self.assertEqual(table.horizontalHeaderItem(0).text(), "封面")
         self.assertEqual(table.horizontalHeaderItem(5).text(), "收藏")
 
@@ -165,7 +165,6 @@ class GuiSmokeTest(unittest.TestCase):
             self.assertEqual(row.data(1, Qt.UserRole), 5001)
             self.assertEqual(row.text(1), "周一更新作品")
             self.assertEqual(tree.headerItem().text(2), "开播时间")
-            self.assertEqual(self.window.tabs.currentIndex(), 3)
             app = QApplication.instance()
             for _ in range(80):
                 app.processEvents()
@@ -173,6 +172,26 @@ class GuiSmokeTest(unittest.TestCase):
                     break
                 time.sleep(0.01)
             self.assertEqual(row.text(2), "2012-07-08")
+
+    def test_rank_autoload_no_tab_jump(self) -> None:
+        """排行榜结果到达（含首屏回调）不再强行切换页签（页签跳转修复）。"""
+        raw_page = [
+            {"id": 1, "type": 2, "name_cn": "甲", "rating": {"score": 8.0, "total": 5}},
+            {"id": 2, "type": 2, "name_cn": "乙", "rating": {"score": 7.5, "total": 9}},
+        ]
+        window = self.window
+        window._rank_request_label = "全部"
+        window._rank_request_category = api_module.config.RANK_CATEGORIES[0]
+        window._rank_request_sort = "热度"
+        window._rank_pool_raw = list(raw_page)
+        window._rank_pool_next_offset = len(raw_page)
+        window._rank_pool_done = True   # 单页测试：无后台补全
+        # 用户此刻在搜索页签（index 0），首屏回调不得把人拽去排行榜
+        window.tabs.setCurrentIndex(0)
+        window._on_rank_first_page(list(raw_page))
+        self.assertEqual(len(window._rank_items), 2)
+        self.assertEqual(window._rank_items[0].title, "乙")  # 热度降序
+        self.assertEqual(window.tabs.currentIndex(), 0)      # 停留在原页签
 
     def test_cover_empty_path(self) -> None:
         # 无封面 URL：直接显示占位，不启动下载线程

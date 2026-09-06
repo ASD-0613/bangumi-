@@ -108,6 +108,91 @@ _DATA_FONT_SIZE: int = 12
 # 封面列宽度（容纳“纵向高度=行高”的竖版海报并留出居中空间）
 _COVER_COLUMN_WIDTH: int = _ROW_HEIGHT + 26
 
+# 全局深色主题（Steam 风格）：只声明颜色/边框/内边距，
+# 字体族与字号仍由 app.setFont 及各控件的 setFont 控制，
+# 避免覆盖表格 12pt、标题 16pt 等专用字号
+STYLE_SHEET: str = """
+QWidget { background-color: #1b2733; color: #cfd8e3; }
+QLabel { background: transparent; }
+QMainWindow, QDialog { background-color: #141d26; }
+
+QTabWidget::pane { border: 1px solid #32465c; border-radius: 4px;
+                   background: #1b2733; top: -1px; }
+QTabBar::tab { background: #141d26; color: #7f9ab0; padding: 7px 18px;
+               border-top-left-radius: 4px; border-top-right-radius: 4px;
+               margin-right: 3px; }
+QTabBar::tab:selected { background: #2a475e; color: #ffffff; }
+QTabBar::tab:hover:!selected { background: #1d2c3a; color: #d8e6f2; }
+
+QTableWidget, QTreeWidget, QListWidget {
+    background: #17222d; alternate-background-color: #1b2836;
+    border: 1px solid #32465c; border-radius: 4px;
+    gridline-color: #243443; selection-background-color: #2a475e;
+    selection-color: #ffffff; }
+QHeaderView::section { background: #22313d; color: #9fb8cc; border: none;
+    border-right: 1px solid #32465c; border-bottom: 2px solid #32465c;
+    padding: 6px; }
+QTableCornerButton::section { background: #22313d; border: none; }
+
+QLineEdit { background: #141d26; border: 1px solid #32465c;
+            border-radius: 4px; padding: 6px 10px; color: #eaf2f8;
+            selection-background-color: #2a475e; }
+QLineEdit:focus { border: 1px solid #66c0f4; }
+
+QPushButton { background: #2a475e; color: #d8e6f2;
+              border: 1px solid #3a556e; border-radius: 4px;
+              padding: 6px 14px; }
+QPushButton:hover { background: #33566f; border-color: #66c0f4; }
+QPushButton:pressed { background: #1f3748; }
+QPushButton:disabled { background: #202c37; color: #5a7183;
+                       border-color: #2a3b4a; }
+
+QComboBox { background: #141d26; border: 1px solid #32465c;
+            border-radius: 4px; padding: 4px 10px; color: #eaf2f8; }
+QComboBox:hover { border: 1px solid #66c0f4; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView { background: #17222d; color: #cfd8e3;
+    selection-background-color: #2a475e; selection-color: #ffffff; }
+
+QTextBrowser { background: #141d26; border: 1px solid #32465c;
+               border-radius: 4px; color: #cfd8e3; }
+
+QScrollBar:vertical { background: #141d26; width: 10px; margin: 0; }
+QScrollBar::handle:vertical { background: #3a556e; border-radius: 5px;
+                              min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #66c0f4; }
+QScrollBar:horizontal { background: #141d26; height: 10px; margin: 0; }
+QScrollBar::handle:horizontal { background: #3a556e; border-radius: 5px;
+                                min-width: 30px; }
+QScrollBar::handle:horizontal:hover { background: #66c0f4; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+QStatusBar { background: #141d26; color: #8fa8bd; }
+QToolTip { background: #2a475e; color: #eaf2f8;
+           border: 1px solid #66c0f4; padding: 4px; }
+
+QListWidget::item { padding: 4px; border-radius: 4px; }
+QListWidget::item:selected { background: #2a475e; color: #ffffff; }
+QListWidget::item:hover:!selected { background: #223444; }
+"""
+
+
+def _colorize_score_cells(table: Any, column: int) -> None:
+    """给“评分”列上色：≥9 金色、≥8 绿色（与命令行版配色一致）。"""
+    for row in range(table.rowCount()):
+        item = table.item(row, column)
+        if item is None:
+            continue
+        try:
+            score = float(item.text())
+        except ValueError:
+            continue
+        if score >= 9.0:
+            item.setForeground(QColor("#ffd45e"))
+        elif score >= 8.0:
+            item.setForeground(QColor("#8fd08f"))
+
 
 def format_score(score: Optional[float]) -> str:
     """评分文本：9.8 / 8.7，缺失返回 “—”。"""
@@ -389,6 +474,14 @@ class MainWindow(QMainWindow):
         self._saved_settings: Dict[str, Any] = settings_store.load()
         self._col_widths_user: Set[str] = set()
         self._widths_programmatic: bool = False
+        # 排行榜渐进式加载：首屏一个请求，后台逐页补全候选池
+        self._rank_pool_raw: List[Dict[str, Any]] = []
+        self._rank_pool_next_offset: int = 0
+        self._rank_pool_token: int = 0      # 新刷新使后台补全链失效
+        self._rank_pool_done: bool = True   # 候选池是否已取尽/中止
+        self._rank_pool_page_size: int = 25
+        self._rank_request_category: Dict[str, Any] = {}
+        self._rank_request_sort: str = "热度"
 
         self._build_ui()
 
@@ -433,7 +526,7 @@ class MainWindow(QMainWindow):
         # 底部：本地缓存占用提示 + 清除缓存按钮
         bottom_bar = QHBoxLayout()
         self.cache_info_label = QLabel("")
-        self.cache_info_label.setStyleSheet("color: gray;")
+        self.cache_info_label.setStyleSheet("color: #8fa8bd;")
         bottom_bar.addWidget(self.cache_info_label)
         bottom_bar.addStretch(1)
         self.clear_cache_button = QPushButton("清除缓存")
@@ -518,7 +611,7 @@ class MainWindow(QMainWindow):
 
         self.detail_subtitle = QLabel("")
         self.detail_subtitle.setWordWrap(True)
-        self.detail_subtitle.setStyleSheet("color: gray;")
+        self.detail_subtitle.setStyleSheet("color: #8fa8bd;")
         outer.addWidget(self.detail_subtitle)
 
         # 封面 + 基本信息
@@ -528,7 +621,8 @@ class MainWindow(QMainWindow):
         self.cover_label.setMinimumSize(150, 200)
         self.cover_label.setMaximumSize(190, 280)
         self.cover_label.setStyleSheet(
-            "border: 1px solid #ccc; background-color: #f5f5f5;"
+            "border: 1px solid #32465c; background-color: #141d26;"
+            "color: #8fa8bd; border-radius: 4px;"
         )
         head.addWidget(self.cover_label, alignment=Qt.AlignTop)
 
@@ -573,7 +667,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(self.detail_episode_table)
         # 分集超出展示上限时的截断提示（CLI 版有，GUI 版此前缺失）
         self.detail_episode_hint = QLabel("")
-        self.detail_episode_hint.setStyleSheet("color: gray;")
+        self.detail_episode_hint.setStyleSheet("color: #8fa8bd;")
         self.detail_episode_hint.setWordWrap(True)
         outer.addWidget(self.detail_episode_hint)
 
@@ -714,7 +808,7 @@ class MainWindow(QMainWindow):
 
         bar = QHBoxLayout()
         self.watched_hint = QLabel("在番剧详情页标题右侧的方框打钩，即可加入本页")
-        self.watched_hint.setStyleSheet("color: gray;")
+        self.watched_hint.setStyleSheet("color: #8fa8bd;")
         bar.addWidget(self.watched_hint)
         bar.addStretch(1)
         layout.addLayout(bar)
@@ -988,6 +1082,7 @@ class MainWindow(QMainWindow):
             [""] + search_row_values(item) for item in self._search_items
         ]
         self._fill_table(self.search_table, rows)
+        _colorize_score_cells(self.search_table, 5)
         for row_idx, _item in enumerate(self._search_items):
             cover_cell = self.search_table.item(row_idx, 0)
             if cover_cell is not None:
@@ -1240,35 +1335,117 @@ class MainWindow(QMainWindow):
         sort_key = self._rank_sort_key()
         self._rank_busy = True
         self._rank_request_label = str(category.get("label", ""))
+        self._rank_request_category = category
+        self._rank_request_sort = sort_key
         self._rank_request_signature = (idx, sort_key)
+        # 渐进式加载状态复位：首屏只取一个服务器页
+        self._rank_pool_token += 1
+        self._rank_pool_raw = []
+        self._rank_pool_next_offset = 0
+        self._rank_pool_done = False
         self.rank_refresh_button.setEnabled(False)
         self.rank_prev_button.setEnabled(False)
         self.rank_next_button.setEnabled(False)
-        self._busy(
-            f"正在获取「{self._rank_request_label}」· 按「{sort_key}」榜单…"
-        )
+        self._busy(f"正在获取「{self._rank_request_label}」首屏榜单…")
 
         worker = ApiWorker(
-            lambda cat=category, sk=sort_key: api.fetch_ranking(cat, sort_key=sk)
+            lambda cat=category: api.fetch_rank_pool_page(cat, 0,
+                                                          self._rank_pool_page_size)
         )
-        worker.succeeded.connect(self._on_rank_result)
+        worker.succeeded.connect(self._on_rank_first_page)
         worker.failed.connect(self._on_rank_error)
         self._register(worker)
 
-    def _on_rank_error(self, message: str) -> None:
-        """榜单请求失败：先恢复交互状态再提示，避免标签页永久卡死。"""
+    def _on_rank_first_page(self, result: Any) -> None:
+        """首屏：第一个服务器页（25 条）到达即渲染，后续页后台补全。"""
         self._rank_busy = False
         self.rank_refresh_button.setEnabled(True)
-        self.rank_prev_button.setEnabled(self._rank_page > 1)
-        self.rank_next_button.setEnabled(self._rank_page < self._rank_pages)
-        self._on_task_error(message)
-        # 请求期间用户改过筛选条件：按最新选择自动补发
-        if self._rank_request_signature != (
-            self.rank_combo.currentIndex(), self._rank_sort_key()
-        ):
-            self.on_rank_refresh()
+        if not isinstance(result, list):
+            self._on_task_error("排行榜返回数据格式异常")
+            return
+        self._rank_pool_raw = list(result)
+        self._rank_pool_next_offset = len(result)
+        self._rank_pool_done = len(result) < self._rank_pool_page_size
+        self._rebuild_rank_view()
+        if not self._rank_pool_done:
+            self._fetch_next_rank_pool_page()
+
+    def _fetch_next_rank_pool_page(self) -> None:
+        """后台逐页补全候选池；每页到达即重排序渲染，直到取尽或出错。"""
+        token = self._rank_pool_token
+        offset = self._rank_pool_next_offset
+        category = self._rank_request_category
+        worker = ApiWorker(
+            lambda cat=category, off=offset:
+                api.fetch_rank_pool_page(cat, off, self._rank_pool_page_size)
+        )
+
+        def on_done(result: Any) -> None:
+            if token != self._rank_pool_token:
+                return  # 已发起新的刷新，丢弃过期页
+            if isinstance(result, list) and result:
+                self._rank_pool_raw.extend(result)
+                self._rank_pool_next_offset += len(result)
+                if len(result) < self._rank_pool_page_size:
+                    self._rank_pool_done = True
+                self._rebuild_rank_view()
+                if not self._rank_pool_done:
+                    self._fetch_next_rank_pool_page()
+            else:
+                self._rank_pool_done = True  # 服务器已取尽
+                self._rebuild_rank_view()
+
+        def on_fail(_message: str) -> None:
+            if token != self._rank_pool_token:
+                return
+            self._rank_pool_done = True
+            self.statusBar().showMessage(
+                "候选池后台补全中断（网络异常），当前榜单基于已获取数据"
+            )
+
+        worker.succeeded.connect(on_done)
+        worker.failed.connect(on_fail)
+        self._register(worker)
+
+    def _rebuild_rank_view(self) -> None:
+        """用当前候选池构建榜单并渲染（保留用户所在页码）。"""
+        try:
+            items = api.build_ranking_from_pool(
+                self._rank_pool_raw,
+                self._rank_request_category,
+                self._rank_request_sort,
+            )
+        except api.BangumiQueryError as exc:
+            self._rank_items = []
+            self._rank_page = 1
+            self._rank_pages = 1
+            self._rank_metric_kind = ""
+            self._render_rank_page()
+            if self._rank_pool_done:
+                self._on_task_error(str(exc))
+            else:
+                self.statusBar().showMessage(f"{exc}（后台继续获取中…）")
+            return
+        self._rank_items = items
+        page_size = max(1, int(config.RANK_PAGE_SIZE))
+        self._rank_pages = max(1, (len(items) + page_size - 1) // page_size)
+        if self._rank_page > self._rank_pages:
+            self._rank_page = self._rank_pages
+        kind = next((i.heat_kind for i in items if i.heat_kind), "")
+        self._rank_metric_kind = "" if kind == "评分" else kind
+        self._render_rank_page()
+        pool_note = (
+            ""
+            if self._rank_pool_done
+            else f"（候选池 {len(self._rank_pool_raw)}/{config.RANK_POOL_SIZE}，"
+                 "后台完善中）"
+        )
+        self.statusBar().showMessage(
+            f"「{self._rank_request_label}」排行榜 {len(items)} 条{pool_note}"
+        )
 
     def _on_rank_result(self, result: Any) -> None:
+        """（测试/兼容路径）直接用一组 RankItem 渲染榜单，不发请求。"""
         self._rank_busy = False
         self.rank_refresh_button.setEnabled(True)
         if not isinstance(result, list):
@@ -1284,12 +1461,30 @@ class MainWindow(QMainWindow):
             kind = ""
         self._rank_metric_kind = kind
         self._render_rank_page()
-        self.tabs.setCurrentIndex(2)
         self.statusBar().showMessage(
             f"「{self._rank_request_label or self.rank_combo.currentText()}」"
             f"排行榜共 {len(self._rank_items)} 条"
         )
         # 请求期间用户改过类别/维度：按最新选择自动补发一次
+        if self._rank_request_signature != (
+            self.rank_combo.currentIndex(), self._rank_sort_key()
+        ):
+            self.on_rank_refresh()
+
+    def _on_rank_error(self, message: str) -> None:
+        """榜单请求失败：先恢复交互状态再提示，避免标签页永久卡死。
+
+        用户已切离排行榜页签时改用状态栏提示，不弹模态框打断。
+        """
+        self._rank_busy = False
+        self.rank_refresh_button.setEnabled(True)
+        self.rank_prev_button.setEnabled(self._rank_page > 1)
+        self.rank_next_button.setEnabled(self._rank_page < self._rank_pages)
+        if self.tabs.currentIndex() == 2:
+            self._on_task_error(message)
+        else:
+            self.statusBar().showMessage(f"排行榜获取失败：{message}")
+        # 请求期间用户改过筛选条件：按最新选择自动补发
         if self._rank_request_signature != (
             self.rank_combo.currentIndex(), self._rank_sort_key()
         ):
@@ -1335,6 +1530,7 @@ class MainWindow(QMainWindow):
                         cell.setIcon(QIcon(pix))
                     cell.setTextAlignment(Qt.AlignCenter)
                 self.rank_table.setItem(row_idx, col_idx, cell)
+        _colorize_score_cells(self.rank_table, 4)  # 评分列
 
         # 列宽：用户已手动调过且列数未变 → 保留用户的列宽；
         # 列数变化（切换排序维度）→ 回到默认铺排，待关闭时重新记忆
@@ -1463,10 +1659,16 @@ class MainWindow(QMainWindow):
         self._register(worker)
 
     def _on_timeline_error(self, message: str) -> None:
-        """日历请求失败：先恢复交互状态再提示，避免标签页永久卡死。"""
+        """日历请求失败：先恢复交互状态再提示，避免标签页永久卡死。
+
+        用户已切离追番日历页签时改用状态栏提示，不弹模态框打断。
+        """
         self._timeline_busy = False
         self.timeline_refresh_button.setEnabled(True)
-        self._on_task_error(message)
+        if self.tabs.currentIndex() == 3:
+            self._on_task_error(message)
+        else:
+            self.statusBar().showMessage(f"放送日历获取失败：{message}")
         # 请求期间用户改过日历类型：按最新选择自动补发
         if self._timeline_request_signature != (self.timeline_combo.currentIndex(),):
             self.on_timeline_refresh()
@@ -1481,7 +1683,8 @@ class MainWindow(QMainWindow):
             day for day in result if isinstance(day, TimelineDay)
         ]
         self._render_timeline_day()
-        self.tabs.setCurrentIndex(3)
+        # 注意：数据到达时不强行切换页签——用户可能已在自动加载期间
+        # 切去别的页签，强行 setCurrentIndex 会造成“页签自动跳转”
         total = sum(len(day.items) for day in self._timeline_days)
         self.statusBar().showMessage(f"放送日历共 {total} 部番剧")
         # 请求期间用户改过日历类型：按最新选择自动补发一次
@@ -1666,9 +1869,9 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _placeholder_pixmap() -> QPixmap:
-        """封面未就绪时的灰色占位图。"""
+        """封面未就绪时的占位图（深色主题配色）。"""
         pm = QPixmap(176, 248)
-        pm.fill(QColor("#e6e6e6"))
+        pm.fill(QColor("#243443"))
         return pm
 
     def _ensure_watched_covers(self, items: Sequence[Dict[str, Any]]) -> None:
@@ -1813,6 +2016,8 @@ def main() -> int:
     # 全局字体用微软雅黑：Windows 默认字体渲染中文发虚，雅黑明显更清晰；
     # 各控件的专用字体（表格 12pt、标题 16pt 等）在此基础之上覆盖
     app.setFont(QFont("Microsoft YaHei UI", 10))
+    # 全局深色主题（Steam 风格）
+    app.setStyleSheet(STYLE_SHEET)
     icon = _app_icon()
     if icon is not None:
         app.setWindowIcon(icon)  # 窗口/任务栏图标
