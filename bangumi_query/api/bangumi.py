@@ -691,6 +691,50 @@ async def get_season_detail(subject_id: int) -> SeasonDetail:
     return detail
 
 
+async def get_season_detail_basic(subject_id: int) -> SeasonDetail:
+    """条目基础详情（仅条目本体，不含分集与声优——首屏快速渲染用）。
+
+    分集与声优由界面在后台经 ``fetch_subject_episodes`` /
+    ``fetch_subject_casts`` 渐进补全，避免三个请求串行导致的长时间等待。
+
+    Args:
+        subject_id: Bangumi 条目 ID。
+
+    Returns:
+        SeasonDetail（episodes 为空列表、casts 为空列表）。
+
+    Raises:
+        BangumiQueryError / BangumiNetworkError / BangumiHTTPError。
+    """
+    subject_id = to_int(subject_id)
+    if not subject_id:
+        raise BangumiQueryError("条目 ID 不合法")
+    data = _get_json(f"{BANGUMI_API_BASE}/subjects/{subject_id}")
+    if not isinstance(data, dict) or to_int(_dig(data, "id")) is None:
+        raise BangumiQueryError("未找到该条目，请确认 ID 是否正确")
+    return parse_season_view(data)
+
+
+async def fetch_subject_episodes(subject_id: int) -> List[Dict[str, Any]]:
+    """获取分集原始列表（供界面渐进式填充；失败返回空列表）。"""
+    data = _fetch_episodes(subject_id)
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return [item for item in data["data"] if isinstance(item, dict)]
+    return []
+
+
+def parse_episodes(raw_items: List[Dict[str, Any]]) -> List[EpisodeInfo]:
+    """把分集原始列表解析为 EpisodeInfo（仅保留正片，过滤 SP/OP/ED）。"""
+    return [EpisodeInfo.from_dict(ep)
+            for ep in _main_episode_entries(raw_items)]
+
+
+async def fetch_subject_casts(subject_id: int) -> List[StaffItem]:
+    """获取主要声优列表（供界面渐进式填充；失败返回空列表）。"""
+    characters = _fetch_characters(subject_id)
+    return parse_character_casts(characters)
+
+
 # ---------------------------------------------------------------------------
 # 3. 排行榜
 # ---------------------------------------------------------------------------

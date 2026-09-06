@@ -1,9 +1,4 @@
-"""“已看完”本地持久化测试（离线，临时目录隔离）。
-
-注意：watched.json 存放在缓存目录的**上一级**，因此测试环境把
-``BANGUMI_CACHE_DIR`` 指到 ``<临时目录>/cache``，使 watched.json
-落在 ``<临时目录>/watched.json``，两者都被隔离在临时目录内。
-"""
+"""“正在看 / 已看完”持久化测试（离线，临时目录隔离）。"""
 
 from __future__ import annotations
 
@@ -16,8 +11,6 @@ from bangumi_query.utils import watched as watched_store
 
 
 class TestWatchedStore(unittest.TestCase):
-    """add / remove / contains / load_items 与文件读写。"""
-
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self._old_dir = os.environ.get("BANGUMI_CACHE_DIR")
@@ -32,61 +25,81 @@ class TestWatchedStore(unittest.TestCase):
 
     def test_empty_by_default(self) -> None:
         self.assertEqual(watched_store.load_items(), [])
-        self.assertFalse(watched_store.contains(33346))
+        self.assertIsNone(watched_store.state_of(33346))
 
-    def test_add_and_contains(self) -> None:
-        watched_store.add(33346, "刀剑神域", "http://example.com/a.jpg")
-        self.assertTrue(watched_store.contains(33346))
-        items = watched_store.load_items()
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["id"], 33346)
-        self.assertEqual(items[0]["title"], "刀剑神域")
-        self.assertEqual(items[0]["cover"], "http://example.com/a.jpg")
+    def test_set_state_and_filters(self) -> None:
+        watched_store.set_state(1, "正在看A", "", "watching")
+        watched_store.set_state(2, "正在看B", "", "watching")
+        watched_store.set_state(3, "已看完C", "", "watched")
+        watching = watched_store.load_items("watching")
+        watched = watched_store.load_items("watched")
+        self.assertEqual([i["id"] for i in watching], [2, 1])
+        self.assertEqual([i["id"] for i in watched], [3])
+        self.assertEqual(watched_store.state_of(1), "watching")
+        self.assertEqual(watched_store.state_of(3), "watched")
 
-    def test_add_newest_first_and_dedupe(self) -> None:
-        watched_store.add(1, "最早", "")
-        watched_store.add(2, "次之", "")
-        watched_store.add(3, "最新", "")
-        self.assertEqual([it["id"] for it in watched_store.load_items()],
-                         [3, 2, 1])
-        # 重复添加：置顶更新且不产生重复
-        watched_store.add(1, "最早（更新）", "http://example.com/x.jpg")
-        ids = [it["id"] for it in watched_store.load_items()]
-        self.assertEqual(ids, [1, 3, 2])
-        self.assertEqual(watched_store.load_items()[0]["cover"],
-                         "http://example.com/x.jpg")
+    def test_state_change_moves_and_updates(self) -> None:
+        watched_store.set_state(1, "旧标题", "", "watching")
+        watched_store.set_state(2, "B", "", "watched")
+        # 1 从“正在看”改为“已看完”：元数据更新、移到 watched 最前
+        watched_store.set_state(1, "新标题", "http://example.com/x.jpg",
+                                "watched")
+        self.assertEqual(watched_store.state_of(1), "watched")
+        watched = watched_store.load_items("watched")
+        self.assertEqual([i["id"] for i in watched], [1, 2])
+        self.assertEqual(watched[0]["title"], "新标题")
+        self.assertEqual(watched[0]["cover"], "http://example.com/x.jpg")
+        self.assertEqual(watched_store.load_items("watching"), [])
+
+    def test_invalid_state_defaults_to_watched(self) -> None:
+        watched_store.set_state(5, "x", "", "bogus-state")
+        self.assertEqual(watched_store.state_of(5), "watched")
 
     def test_remove(self) -> None:
-        watched_store.add(1, "a", "")
-        watched_store.add(2, "b", "")
+        watched_store.set_state(1, "a", "", "watching")
+        watched_store.set_state(2, "b", "", "watched")
         watched_store.remove(1)
-        self.assertFalse(watched_store.contains(1))
-        self.assertTrue(watched_store.contains(2))
+        self.assertIsNone(watched_store.state_of(1))
+        self.assertEqual(watched_store.state_of(2), "watched")
         watched_store.remove(999)  # 不存在：静默
         self.assertEqual(len(watched_store.load_items()), 1)
 
-    def test_persistence_roundtrip(self) -> None:
-        watched_store.add(42, "持久化", "")
-        # 重新读取文件（模拟重启）
+    def test_persistence_roundtrip_v2(self) -> None:
+        watched_store.set_state(42, "持久化", "", "watching")
         data = json.loads(watched_store.watched_path().read_text("utf-8"))
-        self.assertEqual(data["version"], 1)
+        self.assertEqual(data["version"], 2)
         self.assertEqual(data["items"][0]["id"], 42)
+        self.assertEqual(data["items"][0]["state"], "watching")
+
+    def test_legacy_v1_items_migrate_to_watched(self) -> None:
+        path = watched_store.watched_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"version": 1, "items": [
+                {"id": 100, "title": "旧已看完", "cover": ""},
+            ]}),
+            encoding="utf-8",
+        )
+        items = watched_store.load_items()
+        self.assertEqual(items[0]["state"], "watched")
+        # 迁移后的条目可正常改状态
+        watched_store.set_state(100, "旧已看完", "", "watching")
+        self.assertEqual(watched_store.state_of(100), "watching")
 
     def test_corrupt_file_tolerated(self) -> None:
         path = watched_store.watched_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("not json{{", encoding="utf-8")
         self.assertEqual(watched_store.load_items(), [])
-        # 损坏文件上的 add 仍可恢复正常工作
-        watched_store.add(7, "恢复", "")
-        self.assertTrue(watched_store.contains(7))
+        watched_store.set_state(7, "恢复", "", "watched")
+        self.assertTrue(watched_store.state_of(7))
 
     def test_bad_entries_filtered(self) -> None:
         path = watched_store.watched_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
-            json.dumps({"version": 1, "items": [
-                {"id": 1, "title": "ok", "cover": ""},
+            json.dumps({"version": 2, "items": [
+                {"id": 1, "title": "ok", "cover": "", "state": "watching"},
                 {"id": "not-int", "title": "坏条目"},
                 {"title": "缺 id"},
                 "不是字典",
@@ -94,7 +107,12 @@ class TestWatchedStore(unittest.TestCase):
             encoding="utf-8",
         )
         items = watched_store.load_items()
-        self.assertEqual([it["id"] for it in items], [1])
+        self.assertEqual([i["id"] for i in items], [1])
+
+    def test_clear(self) -> None:
+        watched_store.set_state(1, "a", "", "watching")
+        watched_store.clear()
+        self.assertEqual(watched_store.load_items(), [])
 
 
 if __name__ == "__main__":

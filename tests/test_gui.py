@@ -211,7 +211,7 @@ class GuiSmokeTest(unittest.TestCase):
         os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
         try:
             disk_cache.store_cached_bytes("http://example.com/a.jpg", b"abc")
-            watched_store.add(33346, "刀剑神域", "")
+            watched_store.set_state(33346, "刀剑神域", "", "watched")
             self.assertEqual(disk_cache.cache_size(), (1, 3))
             with patch.object(self.window, "_ask_clear_cache",
                               return_value=False), \
@@ -219,7 +219,7 @@ class GuiSmokeTest(unittest.TestCase):
                 self.window.on_clear_cache()
             mock_info.assert_called_once()
             self.assertEqual(disk_cache.cache_size(), (0, 0))
-            self.assertTrue(watched_store.contains(33346))  # 记录保留
+            self.assertEqual(watched_store.state_of(33346), "watched")  # 记录保留
         finally:
             if old_dir is None:
                 os.environ.pop("BANGUMI_CACHE_DIR", None)
@@ -239,13 +239,13 @@ class GuiSmokeTest(unittest.TestCase):
         os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
         try:
             disk_cache.store_cached_bytes("http://example.com/b.jpg", b"abcd")
-            watched_store.add(8, "鬼灭之刃", "")
+            watched_store.set_state(8, "鬼灭之刃", "", "watched")
             with patch.object(self.window, "_ask_clear_cache",
                               return_value=True), \
                  patch.object(gui.QMessageBox, "information"):
                 self.window.on_clear_cache()
             self.assertEqual(disk_cache.cache_size(), (0, 0))
-            self.assertFalse(watched_store.contains(8))
+            self.assertIsNone(watched_store.state_of(8))
         finally:
             if old_dir is None:
                 os.environ.pop("BANGUMI_CACHE_DIR", None)
@@ -265,14 +265,14 @@ class GuiSmokeTest(unittest.TestCase):
         os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
         try:
             disk_cache.store_cached_bytes("http://example.com/c.jpg", b"ab")
-            watched_store.add(9, "取消场景", "")
+            watched_store.set_state(9, "取消场景", "", "watched")
             with patch.object(self.window, "_ask_clear_cache",
                               return_value=None), \
                  patch.object(gui.QMessageBox, "information") as mock_info:
                 self.window.on_clear_cache()
             mock_info.assert_not_called()  # 取消：不弹结果框
             self.assertEqual(disk_cache.cache_size(), (1, 2))
-            self.assertTrue(watched_store.contains(9))
+            self.assertEqual(watched_store.state_of(9), "watched")
         finally:
             if old_dir is None:
                 os.environ.pop("BANGUMI_CACHE_DIR", None)
@@ -281,33 +281,42 @@ class GuiSmokeTest(unittest.TestCase):
             tmp.cleanup()
 
     def test_watched_toggle_and_grid(self) -> None:
-        """详情页打钩 → 本地存储 → “已看完”网格渲染/取消。"""
+        """详情页双段选择器 → 双状态存储 → 两个番剧库渲染/迁移/取消。"""
         import tempfile
 
         from bangumi_query.utils import watched as watched_store
 
         old_dir = os.environ.get("BANGUMI_CACHE_DIR")
         tmp = tempfile.TemporaryDirectory()
-        # watched.json 在缓存目录上一级，这里指向 <tmp>/cache 以隔离
         os.environ["BANGUMI_CACHE_DIR"] = os.path.join(tmp.name, "cache")
         try:
-            # 详情渲染：勾选框随本地记录初始化（未打钩）
+            # 详情渲染：双段选择器随本地记录初始化（未标记）
             self.window._render_detail(_detail())
-            self.assertFalse(self.window.watched_check.isChecked())
-            self.assertTrue(self.window.watched_check.isEnabled())
-            # 打钩：toggled 信号触发入库
-            self.window.watched_check.setChecked(True)
-            self.assertTrue(watched_store.contains(33346))
-            # “已看完”网格：1 张卡片，角色数据为条目 ID
-            self.window._render_watched()
-            self.assertEqual(self.window.watched_grid.count(), 1)
-            item = self.window.watched_grid.item(0)
+            self.assertFalse(self.window._pill_watching_btn.isChecked())
+            self.assertFalse(self.window._pill_watched_btn.isChecked())
+            self.assertTrue(self.window._detail_pill.isEnabled())
+            # 标记“正在看”：入库 + 详情选择器状态
+            self.window._set_detail_state("watching")
+            self.assertEqual(watched_store.state_of(33346), "watching")
+            self.assertTrue(self.window._pill_watching_btn.isChecked())
+            # 番剧库：正在看子页 1 张卡片
+            self.window._render_library()
+            self.assertEqual(self.window.watching_grid.count(), 1)
+            self.assertEqual(self.window.watched_grid.count(), 0)
+            item = self.window.watching_grid.item(0)
             self.assertEqual(item.data(Qt.UserRole), 33346)
             self.assertEqual(item.text(), "刀剑神域")
-            # 取消打钩 → 移出网格
-            self.window.watched_check.setChecked(False)
-            self.assertFalse(watched_store.contains(33346))
-            self.window._render_watched()
+            # 切到“已看完”：状态迁移
+            self.window._set_detail_state("watched")
+            self.assertEqual(watched_store.state_of(33346), "watched")
+            self.window._render_library()
+            self.assertEqual(self.window.watching_grid.count(), 0)
+            self.assertEqual(self.window.watched_grid.count(), 1)
+            # 取消标记 → 两个库都为空
+            self.window._set_detail_state(None)
+            self.assertIsNone(watched_store.state_of(33346))
+            self.window._render_library()
+            self.assertEqual(self.window.watching_grid.count(), 0)
             self.assertEqual(self.window.watched_grid.count(), 0)
         finally:
             if old_dir is None:
