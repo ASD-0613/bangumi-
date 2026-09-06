@@ -31,6 +31,16 @@ ROOT = Path(__file__).resolve().parent
 REPO = "ASD-0613/bangumi-"
 UPLOAD_ATTEMPTS = 5
 
+# 仓库简介（"Edit repository details" 里的 description）。
+# 发版时自动同步到 GitHub；更新项目定位时只需修改此处。
+# 注意：GitHub 描述上限 350 字符，请保持简洁。
+REPO_DESCRIPTION = (
+    "基于 Bangumi API 的番剧（动画）数据查询工具，Windows 单文件 exe 分发，"
+    "双击即用。支持关键词搜索、番剧详情（评分/简介/声优/分集）、排行榜"
+    "（类别×热度/评分/收藏数，分页+封面）、按星期的追番日历、已看完收藏"
+    "（本地打钩标记）、封面磁盘缓存与深色/浅色主题切换。PyQt5 图形界面。"
+)
+
 
 def _token() -> str:
     """从 Git 凭据管理器取 github.com 的访问令牌（不打印）。"""
@@ -166,6 +176,7 @@ def main() -> int:
                 print(f"[完成] {up.json()['browser_download_url']}")
                 print(f"Release 就绪：{html}")
                 _set_default_branch(headers, tag)
+                _update_repo_description(headers)
                 return 0
             print(f"  HTTP {up.status_code}: {up.json().get('message', '')[:200]}")
         except requests.RequestException as exc:
@@ -190,6 +201,23 @@ def _set_default_branch(headers: Dict[str, str], tag: str) -> None:
                   f"{rr.json().get('message', '')[:120]}")
     except requests.RequestException as exc:
         print(f"[repo] 默认分支设置异常：{type(exc).__name__}（不影响 Release）")
+
+
+def _update_repo_description(headers: Dict[str, str]) -> None:
+    """把 REPO_DESCRIPTION 同步到仓库简介（发版时自动更新）。"""
+    try:
+        rr = requests.patch(
+            f"https://api.github.com/repos/{REPO}",
+            headers=headers, json={"description": REPO_DESCRIPTION},
+            timeout=(30, 120),
+        )
+        if rr.status_code == 200:
+            print("[repo] 仓库简介已更新")
+        else:
+            print(f"[repo] 仓库简介更新失败：HTTP {rr.status_code} "
+                  f"{rr.json().get('message', '')[:120]}")
+    except requests.RequestException as exc:
+        print(f"[repo] 仓库简介更新异常：{type(exc).__name__}（不影响 Release）")
 
 
 if __name__ == "__main__":
