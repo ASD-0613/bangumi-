@@ -69,6 +69,7 @@ def main() -> int:
         "--icon", str(ROOT / "icon.ico"),
         # 图标同时打进包内，供运行时设置窗口/任务栏图标使用
         "--add-data", f"{ROOT / 'icon.ico'};.",
+        "--add-data", f"{ROOT / 'bangumi_query/resources'};resources",
         # 生成的 .spec 归入 build/（已被 .gitignore 排除），构建参数以本脚本为准
         "--specpath", "build",
         # 临时入口位于 build/ 子目录，需显式提供项目根目录以定位包

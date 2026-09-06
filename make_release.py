@@ -59,9 +59,12 @@ def _build_zip(top: str, exe: Path) -> Path:
     out = ROOT / f"{top}.zip"
     entries = [(exe, f"{top}/{exe.name}")]
     for name in ("README.md", "requirements.txt", "check_network.py",
-                 "build_exe.py", "make_release.py", ".gitignore"):
+                 "build_exe.py", "make_release.py", ".gitignore",
+                 "assets/banner.jpg"):
         if (ROOT / name).is_file():
             entries.append((ROOT / name, f"{top}/{name}"))
+    for extra in sorted((ROOT / "assets").glob("*.jpg")):
+        entries.append((extra, f"{top}/assets/{extra.name}"))
     for d in ("bangumi_query", "tests"):
         for p in sorted((ROOT / d).rglob("*.py")):
             if "__pycache__" not in p.parts:

@@ -371,6 +371,18 @@ def _is_valid_image(data: bytes) -> bool:
     return bool(image.loadFromData(data))
 
 
+def _resource_path(name: str) -> Path:
+    """运行时资源文件路径（打包态从解压目录，开发态从包内 resources/）。"""
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidate = Path(meipass) / "resources" / name
+            if candidate.is_file():
+                return candidate
+        return Path(sys.executable).parent / "resources" / name
+    return Path(__file__).resolve().parent / "resources" / name
+
+
 def join_names(names: Sequence[str], empty: str = "—") -> str:
     """把地区/风格等列表拼成字符串。"""
     return "、".join(names) if names else empty
@@ -1000,12 +1012,14 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.library_hint)
         layout.addLayout(bar)
 
-        # 两个子库网格（正在看 / 已看完），共用封面缓存与悬停跑马灯无关
+        # 两个子库网格（正在看 / 已看完）+ 空状态页（主题化插画）
         self.watching_grid = self._make_library_grid()
         self.watched_grid = self._make_library_grid()
         self.library_stack = QStackedWidget()
-        self.library_stack.addWidget(self.watching_grid)
-        self.library_stack.addWidget(self.watched_grid)
+        self.library_stack.addWidget(self.watching_grid)   # index 0
+        self.library_stack.addWidget(self.watched_grid)    # index 1
+        self._empty_page = self._make_empty_page()         # index 2
+        self.library_stack.addWidget(self._empty_page)
         layout.addWidget(self.library_stack, stretch=1)
         self._library_page = "watching"
         self._lib_watching_btn.setChecked(True)
@@ -2132,9 +2146,45 @@ class MainWindow(QMainWindow):
         other.blockSignals(False)
         self._library_page = ("watching" if btn is self._lib_watching_btn
                               else "watched")
-        self.library_stack.setCurrentIndex(
-            0 if self._library_page == "watching" else 1)
         self._render_library()
+
+    def _make_empty_page(self) -> QWidget:
+        """空状态页：主题化插画 + 提示文字。"""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setAlignment(Qt.AlignCenter)
+        self._empty_image = QLabel()
+        self._empty_image.setAlignment(Qt.AlignCenter)
+        self._empty_text = QLabel("")
+        self._empty_text.setProperty("hint", True)
+        self._empty_text.setAlignment(Qt.AlignCenter)
+        layout.addStretch(1)
+        layout.addWidget(self._empty_image)
+        layout.addWidget(self._empty_text)
+        layout.addStretch(1)
+        return page
+
+    def _refresh_empty_page(self) -> None:
+        """空状态页：按当前主题刷新插画与卡片样式。"""
+        path = _resource_path("empty_library.png")
+        pixmap = QPixmap(str(path)) if path.is_file() else QPixmap()
+        if not pixmap.isNull():
+            self._empty_image.setPixmap(
+                pixmap.scaledToWidth(460, Qt.SmoothTransformation))
+        # 深浅主题均为白色圆角卡片承载浅色插画，深色下自然醒目
+        self._empty_image.setStyleSheet(
+            "background: #ffffff; border: 1px solid "
+            f"{'#c9d4dd' if self._theme == '浅色' else '#32465c'};"
+            " border-radius: 8px;")
+
+    def _sync_library_stack(self) -> None:
+        """按当前子页与数据是否为空，切换网格 / 空状态页。"""
+        watching_empty = self.watching_grid.count() == 0
+        watched_empty = self.watched_grid.count() == 0
+        if self._library_page == "watching":
+            self.library_stack.setCurrentIndex(2 if watching_empty else 0)
+        else:
+            self.library_stack.setCurrentIndex(2 if watched_empty else 1)
 
     def _render_library(self) -> None:
         """渲染“正在看 / 已看完”两个番剧库（封面 + 底部简中名，最新在前）。"""
@@ -2143,23 +2193,22 @@ class MainWindow(QMainWindow):
         self._fill_library_grid(self.watching_grid, watching)
         self._fill_library_grid(self.watched_grid, watched)
         if self._library_page == "watching":
-            if not watching:
-                self.library_hint.setText(
-                    "暂无「正在看」——在番剧详情页顶部选择「正在看」即可加入")
-            else:
-                self.library_hint.setText(
-                    f"正在看 {len(watching)} 部 · 单击选中，双击查看详情")
+            self.library_hint.setText(
+                "暂无「正在看」——在番剧详情页顶部选择「正在看」即可加入"
+                if not watching else
+                f"正在看 {len(watching)} 部 · 单击选中，双击查看详情")
         else:
-            if not watched:
-                self.library_hint.setText(
-                    "暂无「已看完」——在番剧详情页顶部选择「已看完」即可加入")
-            else:
-                self.library_hint.setText(
-                    f"已看完 {len(watched)} 部 · 单击选中，双击查看详情")
+            self.library_hint.setText(
+                "暂无「已看完」——在番剧详情页顶部选择「已看完」即可加入"
+                if not watched else
+                f"已看完 {len(watched)} 部 · 单击选中，双击查看详情")
+        if (self.library_stack.currentIndex() >= 2):
+            self._empty_text.setText(self.library_hint.text())
         self.statusBar().showMessage(
             f"正在看 {len(watching)} 部 · 已看完 {len(watched)} 部")
         self._ensure_watched_covers(self.watching_grid, watching)
         self._ensure_watched_covers(self.watched_grid, watched)
+        self._sync_library_stack()
 
     def _fill_library_grid(self, grid: QListWidget,
                            items: Sequence[Dict[str, Any]]) -> None:
@@ -2204,6 +2253,7 @@ class MainWindow(QMainWindow):
         gold, green = self._score_colors()
         _colorize_score_cells(self.search_table, 5, gold, green)
         _colorize_score_cells(self.rank_table, 4, gold, green)
+        self._refresh_empty_page()
 
     def _placeholder_pixmap(self) -> QPixmap:
         """封面未就绪时的占位图（配色随主题）。"""
