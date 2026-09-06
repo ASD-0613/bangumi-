@@ -23,7 +23,7 @@ from typing import Any, Dict, List
 # 模块元数据均引用这里。以后如需改名称/版本，只需修改本段。
 APP_NAME: str = "Bangumi 番剧数据查询工具"
 APP_NAME_EN: str = "Bangumi Anime Query"
-VERSION: str = "3.3.3"
+VERSION: str = "3.3.4"
 
 # 调试模式：True 时界面会打印异常堆栈，便于排错
 DEBUG: bool = os.environ.get("BANGUMI_DEBUG", "0") == "1"

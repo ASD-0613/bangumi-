@@ -191,6 +191,16 @@ QLabel[coverBox="true"] { border: 1px solid #32465c;
 
 QScrollArea#detailScroll QScrollBar:vertical { width: 18px; }
 QScrollArea#detailScroll QScrollBar::handle:vertical { min-height: 40px; }
+QTextBrowser[innerBox="true"] QScrollBar:vertical,
+QTableWidget[innerBox="true"] QScrollBar:vertical { width: 6px; }
+QTextBrowser[innerBox="true"] QScrollBar::handle:vertical,
+QTableWidget[innerBox="true"] QScrollBar::handle:vertical {
+    border-radius: 3px; min-height: 20px; }
+QTextBrowser[innerBox="true"] QScrollBar:horizontal,
+QTableWidget[innerBox="true"] QScrollBar:horizontal { height: 6px; }
+QTextBrowser[innerBox="true"] QScrollBar::handle:horizontal,
+QTableWidget[innerBox="true"] QScrollBar::handle:horizontal {
+    border-radius: 3px; min-width: 20px; }
 
 QFrame#statePill { border: 2px solid #cfd8e3; border-radius: 14px;
     background: transparent; }
@@ -278,6 +288,16 @@ QLabel[coverBox="true"] { border: 1px solid #c9d4dd;
 
 QScrollArea#detailScroll QScrollBar:vertical { width: 18px; }
 QScrollArea#detailScroll QScrollBar::handle:vertical { min-height: 40px; }
+QTextBrowser[innerBox="true"] QScrollBar:vertical,
+QTableWidget[innerBox="true"] QScrollBar:vertical { width: 6px; }
+QTextBrowser[innerBox="true"] QScrollBar::handle:vertical,
+QTableWidget[innerBox="true"] QScrollBar::handle:vertical {
+    border-radius: 3px; min-height: 20px; }
+QTextBrowser[innerBox="true"] QScrollBar:horizontal,
+QTableWidget[innerBox="true"] QScrollBar:horizontal { height: 6px; }
+QTextBrowser[innerBox="true"] QScrollBar::handle:horizontal,
+QTableWidget[innerBox="true"] QScrollBar::handle:horizontal {
+    border-radius: 3px; min-width: 20px; }
 
 QFrame#statePill { border: 2px solid #2a3a48; border-radius: 14px;
     background: transparent; }
@@ -488,10 +508,10 @@ class CoverWorker(QThread):
         self.image_ready.emit(self._url, data)
 
 
-class FixedWheelTextBrowser(QTextBrowser):
-    """滚轮仅在本区域内滚动；到达上下边界不再带动整页（阻断滚动链）。
+class _FixedWheelMixin:
+    """混入：滚轮仅在本区域内滚动；到边界不再带动整页（阻断滚动链）。
 
-    光标放在简介/声优框内时只滚框内内容；想翻整页请使用空白区域
+    光标放在内容框内时只滚框内内容；想翻整页请使用空白区域
     或右侧全局滚动条。
     """
 
@@ -504,6 +524,14 @@ class FixedWheelTextBrowser(QTextBrowser):
             event.accept()  # 吞掉边界滚轮，不向父级滚动区传播
             return
         super().wheelEvent(event)
+
+
+class FixedWheelTextBrowser(_FixedWheelMixin, QTextBrowser):
+    """剧情简介 / 声优制作框（细滚动条 + 阻断滚动链）。"""
+
+
+class FixedWheelTableWidget(_FixedWheelMixin, QTableWidget):
+    """基本信息 / 分集列表框（细滚动条 + 阻断滚动链）。"""
 
 
 def make_state_pill(large: bool = False):
@@ -547,7 +575,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"{config.APP_NAME} v{config.VERSION}")
-        self.resize(1220, 760)  # 默认宽度保证“正在看/已看完”5 卡一行
+        self.resize(1123, 760)  # 默认宽度（用户设定）
         self.setMinimumSize(880, 600)
 
         # ---- 状态 ----
@@ -759,7 +787,8 @@ class MainWindow(QMainWindow):
         self.cover_label.setProperty("coverBox", True)
         head.addWidget(self.cover_label, alignment=Qt.AlignTop)
 
-        self.detail_info_table = QTableWidget(0, 2)
+        self.detail_info_table = FixedWheelTableWidget(0, 2)
+        self.detail_info_table.setProperty("innerBox", True)
         self.detail_info_table.setHorizontalHeaderLabels(["项目", "内容"])
         self.detail_info_table.verticalHeader().setVisible(False)
         self.detail_info_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -776,6 +805,7 @@ class MainWindow(QMainWindow):
         # 简介
         outer.addWidget(self._section_label("剧情简介"))
         self.detail_intro = FixedWheelTextBrowser()
+        self.detail_intro.setProperty("innerBox", True)
         self.detail_intro.setFixedHeight(150)
         self.detail_intro.setPlainText("")
         outer.addWidget(self.detail_intro)
@@ -783,13 +813,15 @@ class MainWindow(QMainWindow):
         # 声优 / 制作团队
         outer.addWidget(self._section_label("主要声优 / 制作团队"))
         self.detail_staff = FixedWheelTextBrowser()
+        self.detail_staff.setProperty("innerBox", True)
         self.detail_staff.setFixedHeight(200)
         self.detail_staff.setPlainText("")
         outer.addWidget(self.detail_staff)
 
         # 分集列表
         outer.addWidget(self._section_label("分集列表"))
-        self.detail_episode_table = QTableWidget(0, 3)
+        self.detail_episode_table = FixedWheelTableWidget(0, 3)
+        self.detail_episode_table.setProperty("innerBox", True)
         self.detail_episode_table.setHorizontalHeaderLabels(self.EPISODE_HEADERS)
         self.detail_episode_table.verticalHeader().setVisible(False)
         self.detail_episode_table.setEditTriggers(QAbstractItemView.NoEditTriggers)

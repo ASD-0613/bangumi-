@@ -1,4 +1,4 @@
-# Bangumi 番剧数据查询工具（bangumi_query）v3.3.3
+# Bangumi 番剧数据查询工具（bangumi_query）v3.3.4
 
 基于 **Bangumi API** 的番剧数据查询工具，以 **Windows 单文件 exe** 形式分发
 （PyQt5 图形界面，双击即用，无需安装 Python），**Steam 风格深色界面**。
